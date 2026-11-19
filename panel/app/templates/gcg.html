@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block titulo %}GCG · Disponible{% endblock %}
+{% block contenido %}
+{% set admin = 'usuarios' in u.puede %}
+<header><h1>GCG — control de documentos</h1>
+  <p class="sub">Semáforo de <b>choferes</b> (por DNI) y <b>unidades</b> (por dominio) con el criterio de la app de bloqueos:
+    🟢 habilitado y críticos al día · 🟡 no habilitado sin críticos vencidos (avisa) · 🔴 crítico vencido o dado de baja (bloquea).</p></header>
+{% if msg %}<p class="aviso">✔ {{ msg }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>1 · API key de GCG</h2>
+  <p>{% if clave.cargada %}<span class="chip ok">✔ Cargada</span> terminada en <code>…{{ clave.final }}</code>
+       {% if clave.desde_env %}<span class="suave">(viene del .env del servidor)</span>
+       {% elif clave.actualizado %}<span class="suave">· guardada el {{ clave.actualizado[:16].replace('T', ' ') }}{% if clave.por %} por {{ clave.por }}{% endif %}</span>{% endif %}
+     {% else %}<span class="chip na">Sin cargar</span> <span class="suave">sin la key se usa solo el último exporte de GCG importado.</span>{% endif %}</p>
+  {% if admin %}
+  <form method="post" class="filtros" autocomplete="off">
+    <input type="hidden" name="accion" value="clave">
+    <label style="flex:1 1 20rem">Pegá la API key (la misma de la app de bloqueos)
+      <input name="api_key" type="password" required minlength="8" autocomplete="off" spellcheck="false" placeholder="{{ 'Pegá una nueva para reemplazarla' if clave.cargada else '' }}"></label>
+    <button class="pri">Guardar key</button>
+  </form>
+  {% if clave.cargada and not clave.desde_env %}
+  <form method="post" style="margin-top:.5rem"><input type="hidden" name="accion" value="borrar_clave">
+    <button class="chico mal" onclick="return confirm('¿Borrar la API key? El semáforo vuelve a salir solo del exporte.')">Borrar key</button></form>
+  {% endif %}
+  <p class="suave">Se guarda <b>cifrada</b> en la base (con una clave del servidor que vive en un archivo aparte): nunca se muestra entera ni sale del servidor.</p>
+  {% else %}<p class="vacio">La key la carga un administrador.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>2 · Probar la consulta</h2>
+  <div class="filtros">
+    <label>Qué <select id="p-tipo"><option value="chofer">Chofer (DNI)</option><option value="unidad">Unidad (dominio)</option></select></label>
+    <label>DNI o patente <input id="p-clave" placeholder="30123456 o AB123CD" autocomplete="off"></label>
+    <button type="button" class="pri" id="p-ok" {{ '' if clave.cargada else 'disabled' }}>Consultar en GCG</button>
+  </div>
+  <div id="p-res"></div>
+</section>
+
+<section class="card">
+  <h2>3 · Cuándo se consulta</h2>
+  <form method="post" class="filtros">
+    <input type="hidden" name="accion" value="opciones">
+    <label class="switch"><input type="checkbox" name="vivo_en_carga" value="1" {{ 'checked' if vivo_en_carga }}> Consultar GCG en vivo cuando el transporte carga una unidad (unidad y chofer)</label>
+    <label>Reusar la respuesta durante (horas) <input name="cache_horas" type="number" min="0" max="72" step="0.5" value="{{ cache_horas }}" style="width:6rem"></label>
+    <button class="pri">Guardar</button>
+  </form>
+  <p class="suave">Con la key cargada y esta opción prendida, al cargar se consulta GCG (y la respuesta se reusa las horas indicadas). Si GCG no responde,
+    se usa el último exporte importado, así la carga nunca se traba. Sin key, todo sale del exporte.</p>
+</section>
+
+<section class="card" id="criticos">
+  <h2>4 · Documentos críticos</h2>
+  <p class="suave">Si alguno está vencido, el chofer o la unidad quedan en <b>🔴 rojo</b>. Si GCG lo da por habilitado, un crítico vencido no cuenta
+    (es uno que ya no le pide). Se controla solo para sus <b>países</b> (AR, PY, BO…; vacío = todos). El <b>nombre</b> tiene que coincidir con la columna
+    del exporte de GCG; el <b>Nº GCG</b> es el código del catálogo que devuelve la API (sin él, en vivo no se puede controlar).</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Se controla a</th><th>Documento</th><th>Nº GCG</th><th>Países</th><th>Estado</th><th></th></tr></thead>
+    <tbody>{% for d in criticos %}
+      <tr class="{{ '' if d.activo else 'apagado' }}">
+        <td><select form="dc{{ d.id }}" name="aplica_a"><option value="chofer" {{ 'selected' if d.aplica_a != 'unidad' }}>Chofer</option>
+          <option value="unidad" {{ 'selected' if d.aplica_a == 'unidad' }}>Unidad</option></select></td>
+        <td><input form="dc{{ d.id }}" name="nombre" value="{{ d.nombre }}" maxlength="120" size="32"></td>
+        <td><input form="dc{{ d.id }}" name="gcg_numero" value="{{ d.gcg_numero or '' }}" size="4"></td>
+        <td><input form="dc{{ d.id }}" name="paises" value="{{ d.paises }}" size="8"></td>
+        <td><select form="dc{{ d.id }}" name="activo"><option value="1" {{ 'selected' if d.activo }}>Activo</option><option value="0" {{ 'selected' if not d.activo }}>No se controla</option></select></td>
+        <td><button form="dc{{ d.id }}" class="chico pri">Guardar</button></td></tr>
+    {% endfor %}</tbody></table></div>
+  {% for d in criticos %}<form method="post" action="{{ P }}/criticos" id="dc{{ d.id }}"><input type="hidden" name="id" value="{{ d.id }}"></form>{% endfor %}
+  {% if not criticos|selectattr('aplica_a', 'equalto', 'unidad')|list %}<p class="alerta" style="margin-top:.6rem">Todavía no hay documentos críticos de <b>unidades</b>:
+    sin ellos, una unidad solo puede quedar en verde (habilitada) o amarillo (no habilitada). Agregá los que bloquean (ej. VTV, seguro) con su Nº GCG.</p>{% endif %}
+  <form method="post" action="{{ P }}/criticos" class="filtros" style="margin-top:.6rem">
+    <label>Se controla a <select name="aplica_a"><option value="chofer">Chofer</option><option value="unidad">Unidad</option></select></label>
+    <label style="flex:1 1 16rem">Nuevo documento crítico <input name="nombre" required maxlength="120" placeholder="tal como figura en GCG"></label>
+    <label>Nº GCG <input name="gcg_numero" size="4"></label><label>Países <input name="paises" value="AR" size="8"></label>
+    <button class="pri">Agregar</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>5 · Semáforo según el último exporte de GCG</h2>
+  <div class="kpis">
+    <div class="kpi"><b>{{ res_choferes.verde }}</b><span>🟢 choferes verdes</span></div>
+    <div class="kpi u"><b>{{ res_choferes.amarillo }}</b><span>🟡 choferes amarillos</span></div>
+    <div class="kpi b"><b>{{ res_choferes.rojo }}</b><span>🔴 choferes rojos</span></div>
+    <div class="kpi"><b>{{ res_unidades.verde }}</b><span>🟢 unidades verdes</span></div>
+    <div class="kpi u"><b>{{ res_unidades.amarillo }}</b><span>🟡 unidades amarillas</span></div>
+    <div class="kpi b"><b>{{ res_unidades.rojo }}</b><span>🔴 unidades rojas</span></div>
+  </div>
+  <p class="suave">{% if res_choferes.actualizado %}Exporte del {{ res_choferes.actualizado[:10] }}.{% else %}Todavía no se importó un exporte de GCG.{% endif %}
+    La lista de choferes en rojo y amarillo está en <a href="{{ P }}/consulta">Consulta</a>. El exporte se importa en <a href="{{ P }}/importar">Importar</a>.</p>
+</section>
+
+<script>
+const P = "{{ P }}";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const CHIP = { verde: '<span class="chip ok">🟢 Verde</span>', amarillo: '<span class="chip warn">🟡 Amarillo</span>', rojo: '<span class="chip bad">🔴 Rojo</span>' };
+const dmy = (f) => (f ? f.split("-").reverse().join("/") : "—");
+$("p-ok").onclick = async () => {
+  const clave = $("p-clave").value.trim(); if (!clave) return;
+  $("p-res").innerHTML = '<p class="vacio">Consultando GCG…</p>'; $("p-ok").disabled = true;
+  try {
+    const r = await fetch(`${P}/api/gcg/${$("p-tipo").value}/${encodeURIComponent(clave)}?fresco=1`, { credentials: "same-origin" });
+    const d = await r.json(); if (!d.ok) throw new Error(d.error || "error");
+    $("p-res").innerHTML = `<p class="aviso">${esc(d.nombre || d.clave)}${d.pais ? " · " + esc(d.pais) : ""}: ${CHIP[d.semaforo.color]} ${esc(d.semaforo.texto)}</p>` +
+      (d.criticos.length ? `<div class="tabla"><table><thead><tr><th>Documento crítico</th><th>Vence</th><th>Estado</th></tr></thead><tbody>` +
+        d.criticos.map((c) => `<tr><td>${esc(c.documento)}</td><td>${dmy(c.fecha)}</td><td>${esc(c.estado)}</td></tr>`).join("") + "</tbody></table></div>" : "") +
+      `<details><summary>Todos los documentos que devolvió GCG (${d.documentos.length})</summary><div class="tabla"><table><thead><tr><th>Nº GCG</th><th>Vence</th><th>Estado</th></tr></thead><tbody>` +
+        d.documentos.map((x) => `<tr><td>${esc(x.numero)}</td><td>${dmy(x.fecha)}</td><td>${x.estado ? "vigente" : "vencido"}</td></tr>`).join("") + "</tbody></table></div></details>";
+  } catch (e) { $("p-res").innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+  $("p-ok").disabled = false;
+};
+</script>
+{% endblock %}

@@ -16,7 +16,7 @@
     <a href="{{ P }}/analisis">Análisis</a>
     <a href="{{ P }}/transportes">Transportes y bases</a>
     <a href="{{ P }}/consulta">Consulta</a>
-    {% if 'gestion' in u.puede %}<a href="{{ P }}/importar">Importar</a>{% endif %}
+    {% if 'gestion' in u.puede %}<a href="{{ P }}/importar">Importar</a><a href="{{ P }}/gcg">GCG</a>{% endif %}
     {% if 'usuarios' in u.puede %}<a href="{{ P }}/usuarios">Usuarios</a><a href="{{ P }}/integraciones">Integraciones</a>{% endif %}
     <a href="{{ P }}/ayuda" title="Cómo hacer cada cosa">❓ Ayuda</a>
     <a href="{{ P }}/cuenta">{{ u.nombre or u.usuario }}</a>

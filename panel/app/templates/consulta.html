@@ -5,12 +5,12 @@ if (bv) bv.onclick = async () => {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const v = document.getElementById("vivo"); v.innerHTML = '<p class="vacio">Consultando GCG…</p>'; bv.disabled = true;
   try {
-    const r = await fetch("{{ P }}/api/gcg/" + bv.dataset.dni, { credentials: "same-origin" }); const d = await r.json();
+    const r = await fetch(`{{ P }}/api/gcg/${bv.dataset.tipo}/${encodeURIComponent(bv.dataset.clave)}?fresco=1`, { credentials: "same-origin" }); const d = await r.json();
     if (!d.ok) throw new Error(d.error || "error");
     const chip = { verde: '<span class="chip ok">🟢 Verde</span>', amarillo: '<span class="chip warn">🟡 Amarillo</span>', rojo: '<span class="chip bad">🔴 Rojo</span>' }[d.semaforo.color];
     v.innerHTML = `<p class="aviso">En vivo (${esc(d.nombre || "")}${d.pais ? " · " + esc(d.pais) : ""}): ${chip} ${esc(d.semaforo.texto)}</p>` +
       `<div class="tabla"><table><thead><tr><th>Documento crítico</th><th>Vence</th><th>Estado</th></tr></thead><tbody>` +
-      d.criticos.map((c) => `<tr><td>${esc(c.documento)}</td><td>${esc(c.fecha || "—")}</td><td>${esc(c.estado)}</td></tr>`).join("") + `</tbody></table></div>`;
+      d.criticos.map((c) => `<tr><td>${esc(c.documento)}</td><td>${esc(c.fecha ? c.fecha.split("-").reverse().join("/") : "—")}</td><td>${esc(c.estado)}</td></tr>`).join("") + `</tbody></table></div>`;
   } catch (e) { v.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
   bv.disabled = false;
 };
@@ -53,20 +53,20 @@ if (bv) bv.onclick = async () => {
   {% else %}<p class="vacio">No está en el maestro de unidades (importalo en <a href="{{ P }}/importar">Importar</a>).</p>{% endif %}
   {% endif %}
 
-  {% if res.tipo == 'chofer' %}
+  {% if res.semaforo %}
   <h3>Control de documentos (GCG)</h3>
-  <p>{{ sem(res.semaforo.color) }} {{ res.semaforo.texto }}</p>
+  <p>{{ sem(res.semaforo.color) }} {{ res.semaforo.texto }} <span class="suave">· {{ res.semaforo.fuente }}</span></p>
   {% if res.semaforo.criticos %}
   <div class="tabla"><table>
     <thead><tr><th>Documento crítico</th><th>Vence</th><th>Estado</th></tr></thead>
     <tbody>{% for d in res.semaforo.criticos %}
       <tr><td>{{ d.documento }}</td><td>{{ dmy(d.fecha) if d.fecha else '—' }}</td>
-        <td>{% if d.estado == 'vencido' %}<span class="chip bad">✖ vencido</span>{% elif d.estado == 'por vencer' %}<span class="chip warn">⚠ por vencer</span>
+        <td>{% if d.estado in ('vencido', 'falta') %}<span class="chip bad">✖ {{ d.estado }}</span>{% elif d.estado == 'por vencer' %}<span class="chip warn">⚠ por vencer</span>
             {% elif d.estado == 'vigente' %}<span class="chip ok">✔ vigente</span>{% else %}<span class="chip na">{{ d.estado }}</span>{% endif %}</td></tr>
     {% endfor %}</tbody></table></div>
   {% endif %}
   {% if gcg_vivo %}
-  <p style="margin-top:.6rem"><button type="button" class="chico" id="b-vivo" data-dni="{{ res.dni }}">🔄 Consultar ahora en GCG (en vivo)</button></p>
+  <p style="margin-top:.6rem"><button type="button" class="chico" id="b-vivo" data-tipo="{{ res.tipo }}" data-clave="{{ res.dni if res.tipo == 'chofer' else res.patente }}">🔄 Consultar ahora en GCG (en vivo)</button></p>
   <div id="vivo"></div>
   {% endif %}
   {% endif %}
@@ -127,7 +127,7 @@ if (bv) bv.onclick = async () => {
     {% endfor %}</tbody></table></div>
   {% if resumen.lista|length > 500 %}<p class="vacio">Mostrando 500 de {{ resumen.lista|length }}.</p>{% endif %}
   </details>
-  <p class="suave">Exporte de GCG del {{ resumen.actualizado[:10] }}. Críticos y países en <a href="{{ P }}/importar#criticos">Importar → Documentos críticos</a>.</p>
+  <p class="suave">Exporte de GCG del {{ resumen.actualizado[:10] }}. Críticos, países y API key en <a href="{{ P }}/gcg">GCG</a>.</p>
   {% else %}<p class="vacio">Todavía no se importó el exporte de GCG.</p>{% endif %}
 </section>
 

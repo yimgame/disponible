@@ -55,10 +55,15 @@ CREATE TABLE IF NOT EXISTS bases (
 """
 
 # Columnas agregadas después de la primera versión (la base se migra sola).
-COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT", "chofer_semaforo TEXT"], "gcg": ["pais TEXT", "situacion TEXT"]}
+COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT", "chofer_semaforo TEXT", "unidad_semaforo TEXT"],
+                   "gcg": ["pais TEXT", "situacion TEXT"],
+                   "documentos_criticos": ["aplica_a TEXT NOT NULL DEFAULT 'chofer'"]}
 
 # Documentos críticos (mismo criterio que la app de bloqueos): si uno está vencido el chofer queda en ROJO.
 ESQUEMA_CRITICOS = """
+-- Últimas consultas en vivo a la API de GCG (caché para no consultar en cada carga).
+CREATE TABLE IF NOT EXISTS gcg_vivo (
+    tipo TEXT NOT NULL, clave TEXT NOT NULL, respuesta TEXT, consultado REAL NOT NULL, PRIMARY KEY (tipo, clave));
 CREATE TABLE IF NOT EXISTS documentos_criticos (
     id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL UNIQUE COLLATE NOCASE, gcg_numero INTEGER,
     paises TEXT NOT NULL DEFAULT 'AR', activo INTEGER NOT NULL DEFAULT 1, orden INTEGER NOT NULL DEFAULT 0);

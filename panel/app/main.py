@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from . import auth, db, gcg_api, logica, respaldo, webhooks
+from . import auth, db, gcg_api, logica, respaldo, secretos, webhooks
 
 BASE = Path(__file__).resolve().parent
 PREFIJO = "/panel"
@@ -35,6 +35,7 @@ plantillas.env.globals["P"] = PREFIJO
 def _inicio():
     auth.DB = db.DB
     db.iniciar()
+    secretos.iniciar()
     auth.iniciar()
     respaldo.iniciar()
 
@@ -409,9 +410,10 @@ def consulta(req: Request, q: str = "", msg: str = ""):
         pat = logica.norm_patente(q)
         if dni and len(dni) >= 6 and not any(ch.isalpha() for ch in q):
             res = {"tipo": "chofer", **logica.info_chofer(dni), "alertas": logica.alertas(None, dni)}
-            res["semaforo"] = logica.semaforo_chofer(res["gcg"])
+            res["semaforo"] = logica.semaforo("chofer", dni, res["gcg"])
         else:
             res = {"tipo": "unidad", **logica.info_unidad(pat), "alertas": logica.alertas(pat)}
+            res["semaforo"] = logica.semaforo("unidad", pat, res["gcg"])
         if res.get("gcg"):
             res["gcg"]["docs"] = sorted(json.loads(res["gcg"]["documentos"] or "{}").items())
     return plantillas.TemplateResponse(req, "consulta.html", {"u": u, "q": q, "res": res, "msg": msg, "hoy": db.hoy(),
@@ -419,11 +421,58 @@ def consulta(req: Request, q: str = "", msg: str = ""):
                                                               "resumen": logica.resumen_gcg()})
 
 
-@app.get(PREFIJO + "/api/gcg/{dni}")
-def api_gcg_vivo(req: Request, dni: str):
-    """Consulta en vivo a la API de GCG (si hay GCG_API_KEY)."""
+@app.get(PREFIJO + "/api/gcg/{tipo}/{clave}")
+def api_gcg_vivo(req: Request, tipo: str, clave: str, fresco: str = ""):
+    """Consulta en vivo a la API de GCG: tipo = chofer (DNI) o unidad (dominio). fresco=1 saltea el caché."""
     _requiere(req)
-    return gcg_api.consultar(dni)
+    if tipo not in ("chofer", "unidad"):
+        raise HTTPException(404)
+    return gcg_api.consultar(tipo, clave, usar_cache=fresco != "1")
+
+
+# ------------------------------------------------------------------ GCG: API key, opciones y documentos críticos
+@app.get(PREFIJO + "/gcg", response_class=HTMLResponse)
+def gcg_pagina(req: Request, msg: str = "", error: str = ""):
+    u = _requiere(req, "gestion")
+    k = gcg_api.api_key()
+    inf = secretos.info("gcg_api_key") or {}
+    return plantillas.TemplateResponse(req, "gcg.html", {
+        "u": u, "msg": msg, "error": error, "criticos": logica.criticos(solo_activos=False),
+        "clave": {"cargada": bool(k), "final": k[-4:] if k else "", "desde_env": bool(k) and not secretos.get_secreto("gcg_api_key"),
+                  "actualizado": inf.get("actualizado"), "por": inf.get("por")},
+        "vivo_en_carga": secretos.get("gcg_vivo_en_carga", "1") == "1", "cache_horas": gcg_api.cache_horas(),
+        "res_choferes": logica.resumen_gcg("chofer"), "res_unidades": logica.resumen_gcg("unidad")})
+
+
+@app.post(PREFIJO + "/gcg")
+async def gcg_post(req: Request):
+    _mismo_origen(req)
+    u = _requiere(req, "gestion")
+    f = {k: str(v) for k, v in (await req.form()).items()}
+    accion = f.get("accion")
+    if accion in ("clave", "borrar_clave") and "usuarios" not in u["puede"]:
+        raise HTTPException(403, "Solo un administrador puede cargar la API key")
+    if accion == "clave":
+        k = f.get("api_key", "").strip()
+        if len(k) < 8:
+            return RedirectResponse(f"{PREFIJO}/gcg?error={quote('Pegá la API key completa.')}", 303)
+        secretos.set_secreto("gcg_api_key", k, u["usuario"])
+        with closing(db.con()) as c, c:
+            c.execute("DELETE FROM gcg_vivo")       # otra key: no reusar respuestas viejas
+        msg = "API key guardada (cifrada). Probala abajo con un DNI o una patente."
+    elif accion == "borrar_clave":
+        secretos.set_secreto("gcg_api_key", "", u["usuario"])
+        msg = "API key borrada."
+    elif accion == "opciones":
+        secretos.poner("gcg_vivo_en_carga", "1" if f.get("vivo_en_carga") == "1" else "0", u["usuario"])
+        try:
+            secretos.poner("gcg_cache_horas", str(max(0.0, min(72.0, float(f.get("cache_horas") or 6)))), u["usuario"])
+        except ValueError:
+            pass
+        msg = "Opciones guardadas."
+    else:
+        raise HTTPException(400)
+    return RedirectResponse(f"{PREFIJO}/gcg?msg={quote(msg)}", 303)
 
 
 @app.post(PREFIJO + "/criticos")
@@ -435,8 +484,8 @@ async def criticos_post(req: Request):
         logica.guardar_critico(f, _int(f.get("id")))
         msg = "Documento crítico guardado."
     except logica.Error as e:
-        return RedirectResponse(f"{PREFIJO}/importar?error={quote(str(e))}#criticos", 303)
-    return RedirectResponse(f"{PREFIJO}/importar?msg={quote(msg)}#criticos", 303)
+        return RedirectResponse(f"{PREFIJO}/gcg?error={quote(str(e))}#criticos", 303)
+    return RedirectResponse(f"{PREFIJO}/gcg?msg={quote(msg)}#criticos", 303)
 
 
 @app.post(PREFIJO + "/consulta/bloqueo")

@@ -31,7 +31,9 @@ Para publicarlo en internet poné adelante un proxy con HTTPS.
 - **Consulta**: patente o DNI → maestro, GCG con documentos, bloqueos; bloquear / desbloquear a mano.
   **Semáforo documental del chofer** (mismo criterio que la app de bloqueos): 🟢 habilitado y críticos al día,
   🟡 no habilitado sin críticos vencidos (avisa), 🔴 algún documento crítico vencido o dado de baja (bloquea).
-  Documentos críticos y países configurables; consulta en vivo a la API de GCG por DNI si hay `GCG_API_KEY`.
+  Lo mismo para **unidades** (por dominio). Documentos críticos de chofer y de unidad, con países, configurables.
+- **GCG**: la API key se pega en el panel y se guarda **cifrada** en la base; consulta en vivo (WS Trabajador y WS
+  Vehículo) al cargar, con caché; si GCG no responde se usa el último exporte importado.
 - **Importar**: maestro de unidades (exporte de equipos), GCG (ExportaciónExcel) y lista de bloqueados. Los Excel se
   leen en el navegador y al servidor van solo las columnas que se usan.
 - **Integraciones**: estado del webhook, últimos envíos, documentación de la API.

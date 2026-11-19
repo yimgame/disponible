@@ -202,7 +202,7 @@ function pintarUnidades() {
   const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : f.estado === est)) &&
     (!q || [f.patente, f.chofer_nombre, f.chofer_dni].join(' ').toLowerCase().includes(q)));
   $('h-uni').textContent = `Unidades del ${dmy($('hasta').value)} — ${filas.length}`;
-  $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
+  $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${SEMA[f.unidad_semaforo] ? SEMA[f.unidad_semaforo] + ' ' : ''}${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
     <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
     <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
     <td>${f.chofer_dni ? `${SEMA[f.chofer_semaforo] || '⚪'} ` : ''}${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
