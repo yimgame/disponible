@@ -103,3 +103,16 @@ details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: .7rem; overflow-x: auto; font-size: .8rem; }
 
 @media (max-width: 40rem) { .kpi b { font-size: 1.6rem; } .marca .suave { display: none; } }
+
+/* menú del usuario (configuración) */
+.menu-usuario { position: relative; }
+.menu-usuario summary { cursor: pointer; list-style: none; color: var(--fg); font-weight: 700; }
+.menu-usuario summary::-webkit-details-marker { display: none; }
+.menu-usuario[open] summary, .menu-usuario summary:hover { color: var(--accent); }
+.menu-desplegable { position: absolute; right: 0; top: calc(100% + .5rem); z-index: 20; min-width: 17rem; display: grid; gap: .1rem;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.menu-desplegable a, .menu-desplegable button.link { display: block; padding: .5rem .6rem; border-radius: 6px; text-decoration: none; color: var(--fg); text-align: left; width: 100%; font-weight: 600; }
+.menu-desplegable a:hover, .menu-desplegable button.link:hover { background: var(--bg); color: var(--accent); }
+.menu-desplegable .menu-titulo { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); padding: .4rem .6rem .1rem; }
+.menu-desplegable form { margin: 0; border-top: 1px solid var(--line); margin-top: .3rem; padding-top: .3rem; }
+@media (max-width: 40rem) { .menu-desplegable { right: auto; left: 0; } }

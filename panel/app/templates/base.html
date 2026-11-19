@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>{% block titulo %}Disponible de unidades{% endblock %}</title>
-<link rel="stylesheet" href="{{ P }}/static/panel.css?v=1">
+<link rel="stylesheet" href="{{ P }}/static/panel.css?v=2">
 </head>
 <body>
 <header class="barra">
@@ -16,14 +16,33 @@
     <a href="{{ P }}/analisis">Análisis</a>
     <a href="{{ P }}/transportes">Transportes y bases</a>
     <a href="{{ P }}/consulta">Consulta</a>
-    {% if 'gestion' in u.puede %}<a href="{{ P }}/importar">Importar</a><a href="{{ P }}/gcg">GCG</a>{% endif %}
-    {% if 'usuarios' in u.puede %}<a href="{{ P }}/usuarios">Usuarios</a><a href="{{ P }}/integraciones">Integraciones</a>{% endif %}
     <a href="{{ P }}/ayuda" title="Cómo hacer cada cosa">❓ Ayuda</a>
-    <a href="{{ P }}/cuenta">{{ u.nombre or u.usuario }}</a>
-    <form method="post" action="{{ P }}/salir"><button class="link">Salir</button></form>
+    <details class="menu-usuario" id="menu-usuario">
+      <summary>⚙ {{ u.nombre or u.usuario }} ▾</summary>
+      <div class="menu-desplegable">
+        {% if 'gestion' in u.puede %}
+        <span class="menu-titulo">Configuración</span>
+        <a href="{{ P }}/gcg">🔑 GCG (API key y documentos críticos)</a>
+        <a href="{{ P }}/importar">📥 Importar</a>
+        {% endif %}
+        {% if 'usuarios' in u.puede %}
+        <a href="{{ P }}/usuarios">👥 Usuarios</a>
+        <a href="{{ P }}/integraciones">🔌 Integraciones (n8n / IA)</a>
+        {% endif %}
+        <span class="menu-titulo">Mi cuenta</span>
+        <a href="{{ P }}/cuenta">Cambiar mi contraseña</a>
+        <form method="post" action="{{ P }}/salir"><button class="link">Salir</button></form>
+      </div>
+    </details>
   </nav>
   {% endif %}
 </header>
 <main>{% block contenido %}{% endblock %}</main>
+<script>
+// cerrar el menú del usuario al tocar afuera o con Escape
+(() => { const m = document.getElementById("menu-usuario"); if (!m) return;
+  document.addEventListener("click", (e) => { if (m.open && !m.contains(e.target)) m.open = false; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") m.open = false; }); })();
+</script>
 </body>
 </html>
