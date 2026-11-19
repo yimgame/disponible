@@ -1,0 +1,26 @@
+# Nada de producción en el repo: la base se crea sola al arrancar el panel.
+
+# Carpeta para datos sensibles (exportes de GCG/JDE, listas de choferes, compose del server, notas):
+# todo lo de adentro queda afuera, salvo el LEEME.md que explica para qué es.
+ignorar/*
+!ignorar/LEEME.md
+
+.env
+*.db
+*.db-*
+*.db.bak*
+*.sqlite*
+respaldos/
+# Archivos subidos
+recursos/
+# Copias de seguridad y compose del servidor (rutas internas)
+*.bak*
+*.tgz
+docker-compose.portainer*.yml
+# Exportes sueltos por las dudas (van en ignorar/)
+*.xlsx
+*.xls
+*.csv
+__pycache__/
+*.pyc
+.DS_Store

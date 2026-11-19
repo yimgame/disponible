@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}Ingresar · Disponible{% endblock %}
+{% block contenido %}
+<div class="tarjeta angosta">
+  <h1>Ingresar</h1>
+  <p class="suave">Panel del disponible de unidades.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ P }}/login">
+    <label>Usuario<input name="usuario" autocomplete="username" autocapitalize="none" required autofocus></label>
+    <label>Contraseña<input name="clave" type="password" autocomplete="current-password" required></label>
+    <button class="primario">Entrar</button>
+  </form>
+</div>
+{% endblock %}

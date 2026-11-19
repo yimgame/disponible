@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block titulo %}Consulta · Disponible{% endblock %}
+{% block contenido %}
+{% set gestion = 'gestion' in u.puede %}
+{% macro dmy(f) %}{{ f[8:10] }}/{{ f[5:7] }}/{{ f[0:4] }}{% endmacro %}
+<header><h1>Consulta de unidad o chofer</h1>
+  <p class="sub">Estado en el maestro de unidades, documentos de GCG y bloqueos. Lo mismo que se le avisa al transporte cuando la carga.</p></header>
+{% if msg %}<p class="aviso">{{ msg }}</p>{% endif %}
+<section class="card">
+  <form method="get" class="filtros">
+    <label>Patente o DNI <input name="q" value="{{ q }}" autofocus placeholder="AB123CD o 30123456" autocomplete="off"></label>
+    <button class="pri">Consultar</button>
+  </form>
+</section>
+
+{% if res %}
+<section class="card">
+  <h2>{{ 'Unidad ' ~ res.patente if res.tipo == 'unidad' else 'Chofer DNI ' ~ res.dni }}</h2>
+  {% if res.alertas %}
+    {% for a in res.alertas %}<p class="{{ 'error' if a.nivel == 'bloqueo' else 'alerta' }}" style="margin:.3rem 0">{{ '⛔' if a.nivel == 'bloqueo' else '⚠' }} {{ a.texto }}</p>{% endfor %}
+  {% else %}<p class="aviso">✔ Sin bloqueos ni avisos.</p>{% endif %}
+
+  {% if res.tipo == 'unidad' %}
+  <h3>Maestro de unidades</h3>
+  {% if res.unidad %}{% set x = res.unidad %}
+  <div class="tabla"><table>
+    <tr><th>Transportista</th><td>{{ x.transportista or '—' }} {% if x.nro_proveedor %}<span class="suave">(prov. {{ x.nro_proveedor }})</span>{% endif %}</td></tr>
+    <tr><th>Tipo</th><td class="{{ x.tipo }}">{{ 'Refrigerado' if x.tipo == 'refri' else 'Seco' }} <span class="suave">{{ x.tipo_equipo or '' }}</span></td></tr>
+    <tr><th>Capacidad</th><td>{{ x.pallets or '—' }} pallets{% if x.kg_cap %} · {{ x.kg_cap|int }} kg{% endif %}{% if x.ejes %} · {{ x.ejes }} ejes{% endif %}</td></tr>
+    <tr><th>Bloqueado</th><td>{% if x.bloqueado %}<span class="chip bad">Sí</span>{% else %}<span class="chip ok">No</span>{% endif %}</td></tr>
+    <tr><th>Documento vencido</th><td>{{ x.doc_vencido or '—' }}</td></tr>
+    <tr><th>Fecha de expiración</th><td>{{ dmy(x.fecha_expiracion) if x.fecha_expiracion else '—' }}</td></tr>
+    <tr><th>Satelital / dedicado</th><td>{{ 'Sí' if x.satelital else 'No' }} / {{ 'Sí' if x.dedicado else 'No' }}</td></tr>
+    <tr><th>Actualizado</th><td class="suave">{{ x.actualizado[:16].replace('T', ' ') }}</td></tr>
+  </table></div>
+  {% else %}<p class="vacio">No está en el maestro de unidades (importalo en <a href="{{ P }}/importar">Importar</a>).</p>{% endif %}
+  {% endif %}
+
+  <h3>GCG</h3>
+  {% if res.gcg %}{% set g = res.gcg %}
+  <p><b>{{ g.nombre }}</b>{% if g.cuil %} · CUIL {{ g.cuil }}{% endif %} ·
+    {% if g.estado == 'HABILITADO' %}<span class="chip ok">Habilitado</span>{% else %}<span class="chip bad">{{ (g.estado or 'sin estado')|capitalize }}</span>{% endif %}
+    {% if g.contratista %}<br><span class="suave">Contratista: {{ g.contratista }}{% if g.subcontratista %} · subcontratista: {{ g.subcontratista }}{% endif %}</span>{% endif %}</p>
+  {% if g.docs %}
+  <div class="tabla"><table>
+    <thead><tr><th>Documento</th><th>Vence / estado</th></tr></thead>
+    <tbody>{% for nombre, valor in g.docs %}
+      {% set f = valor|string %}
+      {% set iso = (f[6:10] ~ '-' ~ f[3:5] ~ '-' ~ f[0:2]) if (f|length == 10 and f[2] in '-/') else (f[0:10] if (f|length >= 10 and f[4] == '-') else '') %}
+      <tr><td>{{ nombre }}</td><td>{% if iso and iso < hoy %}<span class="chip bad">vencido {{ f }}</span>{% elif iso %}{{ f }}{% else %}{{ f }}{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <p class="suave">Exporte de GCG del {{ g.actualizado[:10] }}.</p>
+  {% else %}<p class="vacio">No figura en el último exporte de GCG importado.</p>{% endif %}
+
+  <h3>Bloqueos</h3>
+  {% if res.bloqueos %}
+  <div class="tabla"><table>
+    <thead><tr><th>Motivo</th><th>Origen</th><th>Desde</th><th>Quién</th>{% if gestion %}<th></th>{% endif %}</tr></thead>
+    <tbody>{% for b in res.bloqueos %}
+      <tr><td>{{ b.motivo or '—' }}</td><td>{{ b.origen }}</td><td>{{ b.creado[:16].replace('T', ' ') }}</td><td>{{ b.creado_por or '' }}</td>
+        {% if gestion %}<td><form method="post" action="{{ P }}/consulta/bloqueo"><input type="hidden" name="accion" value="quitar"><input type="hidden" name="id" value="{{ b.id }}">
+          <input type="hidden" name="q" value="{{ q }}"><button class="chico" onclick="return confirm('¿Quitar este bloqueo?')">Quitar</button></form></td>{% endif %}</tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="vacio">Sin bloqueos activos.</p>{% endif %}
+  {% if gestion %}
+  <form method="post" action="{{ P }}/consulta/bloqueo" class="filtros" style="margin-top:.6rem">
+    <input type="hidden" name="tipo" value="{{ res.tipo }}"><input type="hidden" name="clave" value="{{ res.patente if res.tipo == 'unidad' else res.dni }}">
+    <input type="hidden" name="q" value="{{ q }}">
+    <label style="flex:1 1 18rem">Bloquear manualmente — motivo <input name="motivo" required maxlength="300" placeholder="ej. siniestro, documentación pendiente"></label>
+    <button class="mal">⛔ Bloquear</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Bloqueos activos ({{ bloqueos|length }})</h2>
+  {% if bloqueos %}
+  <div class="tabla"><table>
+    <thead><tr><th>Tipo</th><th>Patente / DNI</th><th>Motivo</th><th>Origen</th><th>Desde</th></tr></thead>
+    <tbody>{% for b in bloqueos[:300] %}
+      <tr><td>{{ b.tipo }}</td><td class="pat"><a href="?q={{ b.clave }}">{{ b.clave }}</a></td><td>{{ b.motivo or '—' }}</td><td>{{ b.origen }}</td><td class="nw">{{ b.creado[:10] }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% if bloqueos|length > 300 %}<p class="vacio">Mostrando 300 de {{ bloqueos|length }}.</p>{% endif %}
+  {% else %}<p class="vacio">No hay bloqueos manuales ni volcados. (Los bloqueados del maestro de unidades se ven en cada unidad.)</p>{% endif %}
+</section>
+{% endblock %}

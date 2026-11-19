@@ -1,0 +1,40 @@
+# Disponible de unidades: página del transporte + panel (FastAPI + SQLite) + API para agentes.
+#   cp .env.example .env   # y completá
+#   docker compose up -d --build
+# Panel: http://localhost:${PUERTO:-8140}/panel/
+services:
+  web:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports:
+      - "${PUERTO:-8140}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [panel]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  panel:
+    build: ./panel
+    image: disponible-panel:1
+    container_name: disponible-panel        # nginx.conf lo busca por este nombre
+    restart: unless-stopped
+    environment:
+      - PANEL_ADMIN_PASSWORD=${PANEL_ADMIN_PASSWORD:?Definí PANEL_ADMIN_PASSWORD en .env}
+      - PANEL_ADMIN_USER=${PANEL_ADMIN_USER:-admin}
+      - PANEL_DB=/data/disponible.db
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - WEBHOOK_EVENTOS=${WEBHOOK_EVENTOS:-}
+      - AGENTE_API_KEY=${AGENTE_API_KEY:-}
+    volumes:
+      - ./panel/app:/srv/app:ro               # el código se monta: cambiarlo = reiniciar el panel
+      - disponible_data:/data                 # base SQLite (+ /data/respaldos, backup diario 30 días)
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  disponible_data:

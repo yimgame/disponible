@@ -1,0 +1,487 @@
+"""Lógica del disponible: transportes, movimientos (pone/saca), usos, estado del día, alertas de bloqueo e imports.
+
+Estado de cada patente en un día = su último evento del día (movimientos y usos no anulados, por hora):
+  agrega -> disponible · uso -> usada (se descuenta) · quita -> sacada
+Cargado = disponible + usada; quedan = disponible.
+"""
+import json
+import re
+import secrets
+import unicodedata
+from contextlib import closing
+from datetime import date, datetime, timedelta
+
+from . import db, webhooks
+
+AVISO_DOC_DIAS = 15
+
+
+class Error(ValueError):
+    pass
+
+
+def _clave(s):
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", s).split())
+
+
+def norm_patente(p):
+    return re.sub(r"[\s.\-_]", "", str(p or "")).upper()[:10]
+
+
+def patente_valida(p):
+    return bool(re.fullmatch(r"(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}", p))
+
+
+def norm_dni(d):
+    d = re.sub(r"\D", "", str(d or "").split(".")[0]).lstrip("0")
+    return d if re.fullmatch(r"\d{6,12}", d) else ""
+
+
+def _txt(v, n=200):
+    return " ".join(str(v or "").split())[:n]
+
+
+def _fecha_iso(s):
+    """'2026-11-19', '19/11/2026', '19-11-2026', serial de Excel o '2026-11-19 10:00 ...' -> 'AAAA-MM-DD' ('' si no)."""
+    s = str(s or "").strip()
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    try:
+        if m:
+            return date(int(m[1]), int(m[2]), int(m[3])).isoformat()
+        m = re.match(r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})", s)
+        if m:
+            return date(int(m[3]), int(m[2]), int(m[1])).isoformat()
+        if re.fullmatch(r"\d{5}(\.\d+)?", s):
+            return (date(1899, 12, 30) + timedelta(days=int(float(s)))).isoformat()
+    except ValueError:
+        pass
+    return ""
+
+
+# ------------------------------------------------------------------ transportes
+def transportes(solo_activos=False):
+    with closing(db.con()) as c:
+        filas = [dict(r) for r in c.execute("SELECT * FROM transportes ORDER BY nombre COLLATE NOCASE")]
+    return [t for t in filas if t["activo"] or not solo_activos]
+
+
+def transporte(tid=None, token=None):
+    with closing(db.con()) as c:
+        r = (c.execute("SELECT * FROM transportes WHERE id=?", (tid,)) if tid else
+             c.execute("SELECT * FROM transportes WHERE token=? AND activo=1", (str(token or ""),))).fetchone()
+    return dict(r) if r else None
+
+
+def guardar_transporte(datos, tid=None):
+    nombre = _txt(datos.get("nombre"), 80)
+    if len(nombre) < 2:
+        raise Error("Poné el nombre del transporte.")
+    campos = {"nombre": nombre, "nro_proveedor": re.sub(r"\D", "", str(datos.get("nro_proveedor") or "").split(".")[0]) or None,
+              "cuota_dia": max(0, min(500, int(float(datos.get("cuota_dia") or 0)))),
+              "telefono": re.sub(r"[^\d+]", "", str(datos.get("telefono") or ""))[:20],
+              "activo": 0 if str(datos.get("activo", "1")) in ("0", "false", "False") else 1,
+              "notas": _txt(datos.get("notas"), 500)}
+    with closing(db.con()) as c, c:
+        otro = c.execute("SELECT id FROM transportes WHERE nombre=? COLLATE NOCASE AND id IS NOT ?", (nombre, tid)).fetchone()
+        if otro:
+            raise Error("Ya hay un transporte con ese nombre.")
+        if tid:
+            c.execute(f"UPDATE transportes SET {', '.join(k + '=?' for k in campos)} WHERE id=?", [*campos.values(), tid])
+        else:
+            tid = c.execute(f"INSERT INTO transportes ({', '.join(campos)}, token, creado) VALUES ({', '.join('?' * len(campos))}, ?, ?)",
+                            [*campos.values(), secrets.token_urlsafe(18), db.ahora_iso()]).lastrowid
+    return transporte(tid)
+
+
+def nuevo_token(tid):
+    with closing(db.con()) as c, c:
+        c.execute("UPDATE transportes SET token=? WHERE id=?", (secrets.token_urlsafe(18), tid))
+    return transporte(tid)
+
+
+def transportistas_del_maestro():
+    """Nombres y nº de proveedor del maestro de unidades (para el alta de transportes)."""
+    with closing(db.con()) as c:
+        return [dict(r) for r in c.execute("""SELECT nro_proveedor, MAX(transportista) AS nombre, COUNT(*) AS unidades
+                                              FROM unidades WHERE transportista IS NOT NULL AND transportista<>''
+                                              GROUP BY nro_proveedor ORDER BY nombre""")]
+
+
+# ------------------------------------------------------------------ alertas (bloqueos, documentos, GCG)
+def _docs_vencidos(docs_json, hoy):
+    vencidos, por_vencer = [], []
+    for nombre, valor in (json.loads(docs_json or "{}") or {}).items():
+        f = _fecha_iso(valor)
+        if not f:
+            continue
+        if f < hoy:
+            vencidos.append(f"{nombre} ({f[8:10]}/{f[5:7]}/{f[:4]})")
+        elif f <= (date.fromisoformat(hoy) + timedelta(days=AVISO_DOC_DIAS)).isoformat():
+            por_vencer.append(f"{nombre} ({f[8:10]}/{f[5:7]}/{f[:4]})")
+    return vencidos, por_vencer
+
+
+def info_unidad(patente):
+    p = norm_patente(patente)
+    with closing(db.con()) as c:
+        u = c.execute("SELECT * FROM unidades WHERE patente=?", (p,)).fetchone()
+        b = [dict(r) for r in c.execute("SELECT * FROM bloqueos WHERE tipo='unidad' AND clave=? AND activo=1", (p,))]
+        g = c.execute("SELECT * FROM gcg WHERE tipo='vehiculo' AND clave=?", (p,)).fetchone()
+    return {"patente": p, "unidad": dict(u) if u else None, "bloqueos": b, "gcg": dict(g) if g else None}
+
+
+def info_chofer(dni):
+    d = norm_dni(dni)
+    with closing(db.con()) as c:
+        b = [dict(r) for r in c.execute("SELECT * FROM bloqueos WHERE tipo='chofer' AND clave=? AND activo=1", (d,))]
+        g = c.execute("SELECT * FROM gcg WHERE tipo='trabajador' AND clave=?", (d,)).fetchone()
+    return {"dni": d, "bloqueos": b, "gcg": dict(g) if g else None}
+
+
+def alertas(patente, dni=None):
+    """[{nivel: bloqueo|aviso, texto}] para mostrarle al transporte y guardar en el disponible."""
+    hoy = db.hoy()
+    out = []
+    iu = info_unidad(patente) if patente else {"unidad": None, "bloqueos": [], "gcg": None}
+    u = iu["unidad"]
+    if u and u["bloqueado"]:
+        extra = f" — documento vencido: {u['doc_vencido']}" if u.get("doc_vencido") else ""
+        out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada en el maestro de unidades{extra}"})
+    if u and u.get("fecha_expiracion") and u["fecha_expiracion"] < hoy:
+        out.append({"nivel": "aviso", "texto": f"Unidad con fecha de expiración vencida ({u['fecha_expiracion']})"})
+    for b in iu["bloqueos"]:
+        out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
+    g = iu["gcg"]
+    if g:
+        if g["estado"] and g["estado"] != "HABILITADO":
+            out.append({"nivel": "bloqueo", "texto": f"Unidad {g['estado'].lower()} en GCG"})
+        v, pv = _docs_vencidos(g["documentos"], hoy)
+        if v:
+            out.append({"nivel": "aviso", "texto": "GCG unidad, documentos vencidos: " + ", ".join(v)})
+        if pv:
+            out.append({"nivel": "aviso", "texto": "GCG unidad, documentos por vencer: " + ", ".join(pv)})
+    if dni:
+        ic = info_chofer(dni)
+        for b in ic["bloqueos"]:
+            out.append({"nivel": "bloqueo", "texto": f"Chofer bloqueado: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
+        g = ic["gcg"]
+        if g:
+            if g["estado"] and g["estado"] != "HABILITADO":
+                out.append({"nivel": "bloqueo", "texto": f"Chofer {g['estado'].lower()} en GCG"})
+            v, pv = _docs_vencidos(g["documentos"], hoy)
+            if v:
+                out.append({"nivel": "aviso", "texto": "GCG chofer, documentos vencidos: " + ", ".join(v)})
+            if pv:
+                out.append({"nivel": "aviso", "texto": "GCG chofer, documentos por vencer: " + ", ".join(pv)})
+        elif dni:
+            out.append({"nivel": "aviso", "texto": "El chofer no figura en el último exporte de GCG"})
+    return out
+
+
+# ------------------------------------------------------------------ movimientos (lo que informa el transporte)
+def _eta(v):
+    """'2026-11-19T15:30' (input datetime-local) -> ISO local; '' si no viene o no se entiende."""
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    try:
+        d = datetime.fromisoformat(s.replace("Z", ""))
+    except ValueError:
+        raise Error("La fecha y hora de arribo no es válida.")
+    return d.replace(tzinfo=None).isoformat(timespec="minutes")
+
+
+def registrar_movimiento(t, b, informante="link"):
+    patente = norm_patente(b.get("patente"))
+    if not patente_valida(patente):
+        raise Error("Revisá la patente (ej. AB123CD o ABC123).")
+    accion = "quita" if b.get("accion") == "quita" else "agrega"
+    u = info_unidad(patente)["unidad"]
+    tipo = b.get("tipo") if b.get("tipo") in ("refri", "seco") else (u["tipo"] if u else "")
+    try:
+        pallets = int(float(b.get("pallets") or (u["pallets"] if u and u["pallets"] else 0)))
+    except ValueError:
+        pallets = 0
+    dni = norm_dni(b.get("chofer_dni"))
+    if b.get("chofer_dni") and not dni:
+        raise Error("Revisá el DNI del chofer.")
+    if accion == "agrega":
+        if not tipo:
+            raise Error("Elegí Refrigerado o Seco.")
+        if not 1 <= pallets <= 40:
+            raise Error("Pallets entre 1 y 40.")
+    eta = _eta(b.get("eta")) if accion == "agrega" else ""
+    al = alertas(patente, dni) if accion == "agrega" else []
+    bloq = [a["texto"] for a in al if a["nivel"] == "bloqueo"]
+    ahora = db.ahora()
+    chofer_nombre = (info_chofer(dni)["gcg"] or {}).get("nombre") if dni else None
+    fila = {"creado": ahora.isoformat(timespec="microseconds"), "fecha": ahora.date().isoformat(),
+            "hora": ahora.strftime("%H:%M"), "transporte_id": t["id"], "transporte": t["nombre"], "patente": patente,
+            "tipo": tipo, "pallets": pallets or None, "accion": accion, "eta": eta, "chofer_dni": dni,
+            "chofer_nombre": chofer_nombre, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
+            "bloqueado": 1 if bloq else 0, "bloqueo_motivo": " · ".join(bloq)[:500]}
+    with closing(db.con()) as c, c:
+        fila["id"] = c.execute(f"INSERT INTO movimientos ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
+                               list(fila.values())).lastrowid
+    webhooks.enviar("movimiento", {**fila, "alertas": al})
+    if bloq:
+        webhooks.enviar("alerta_bloqueo", {"transporte": t["nombre"], "patente": patente, "chofer_dni": dni,
+                                           "motivos": bloq, "movimiento_id": fila["id"]})
+    return fila, al
+
+
+# ------------------------------------------------------------------ estado del día
+def estado_dia(fecha=None, transporte_id=None):
+    fecha = fecha or db.hoy()
+    with closing(db.con()) as c:
+        movs = [dict(r) for r in c.execute("SELECT * FROM movimientos WHERE fecha=? ORDER BY creado", (fecha,))]
+        usos = [dict(r) for r in c.execute("SELECT * FROM usos WHERE fecha=? AND anulado=0 ORDER BY creado", (fecha,))]
+        tts = {t["id"]: dict(t) for t in c.execute("SELECT * FROM transportes")}
+    eventos = sorted([("m", m["creado"], m) for m in movs] + [("u", u["creado"], u) for u in usos], key=lambda e: e[1])
+    ult = {}
+    for clase, _, e in eventos:
+        p = e["patente"]
+        if clase == "m":
+            if e["accion"] == "agrega":
+                ult[p] = {"estado": "disponible", "mov": e, "uso": None}
+            elif p in ult and ult[p]["estado"] == "disponible":
+                ult[p] = {"estado": "sacada", "mov": e, "uso": None}
+        elif p in ult:
+            ult[p] = {"estado": "usada", "mov": ult[p]["mov"], "uso": e}
+    filas = []
+    for p, s in ult.items():
+        m = s["mov"]
+        if transporte_id and m["transporte_id"] != transporte_id:
+            continue
+        if s["estado"] == "sacada":
+            continue
+        filas.append({"patente": p, "estado": s["estado"], "transporte_id": m["transporte_id"], "transporte": m["transporte"],
+                      "tipo": m["tipo"], "pallets": m["pallets"] or 0, "eta": m["eta"], "hora": m["hora"],
+                      "chofer_dni": m["chofer_dni"], "chofer_nombre": m["chofer_nombre"], "comentario": m["comentario"],
+                      "bloqueado": m["bloqueado"], "bloqueo_motivo": m["bloqueo_motivo"], "movimiento_id": m["id"],
+                      "uso": s["uso"]})
+    filas.sort(key=lambda f: (f["estado"] != "disponible", f["transporte"] or "", f["eta"] or "9", f["patente"]))
+
+    def vacio():
+        return {"cargadas": 0, "usadas": 0, "quedan": 0, "pallets_quedan": 0, "bloqueadas": 0,
+                "refri": 0, "seco": 0, "refri_quedan": 0, "seco_quedan": 0}
+    tot, por_t = vacio(), {}
+    for f in filas:
+        for g in (tot, por_t.setdefault(f["transporte_id"], vacio())):
+            g["cargadas"] += 1
+            g[f["tipo"] or "seco"] += 1
+            if f["estado"] == "usada":
+                g["usadas"] += 1
+            else:
+                g["quedan"] += 1
+                g["pallets_quedan"] += f["pallets"]
+                g[(f["tipo"] or "seco") + "_quedan"] += 1
+                g["bloqueadas"] += f["bloqueado"]
+    resumen = []
+    for tid, t in tts.items():
+        if transporte_id and tid != transporte_id:
+            continue
+        g = por_t.get(tid, vacio())
+        if not t["activo"] and not g["cargadas"]:
+            continue
+        cuota = t["cuota_dia"] or 0
+        resumen.append({"transporte_id": tid, "transporte": t["nombre"], "cuota": cuota, "token": t["token"],
+                        "telefono": t["telefono"], **g,
+                        "cumplimiento": round(g["cargadas"] * 100 / cuota) if cuota else None})
+    resumen.sort(key=lambda r: (r["cumplimiento"] if r["cumplimiento"] is not None else 999, r["transporte"]))
+    return {"fecha": fecha, "filas": filas, "totales": tot, "transportes": resumen,
+            "puso": sum(1 for m in movs if m["accion"] == "agrega" and (not transporte_id or m["transporte_id"] == transporte_id)),
+            "saco": sum(1 for m in movs if m["accion"] == "quita" and (not transporte_id or m["transporte_id"] == transporte_id))}
+
+
+# ------------------------------------------------------------------ usos (se descuenta del disponible)
+def usar(patente, datos, usuario, fecha=None):
+    fecha = fecha or db.hoy()
+    p = norm_patente(patente)
+    f = next((x for x in estado_dia(fecha)["filas"] if x["patente"] == p), None)
+    if not f:
+        raise Error(f"{p} no está en el disponible del {fecha}.")
+    if f["estado"] != "disponible":
+        raise Error(f"{p} ya fue usada.")
+    destino = _txt(datos.get("destino"), 120)
+    if not destino:
+        raise Error("Poné dónde se usó (destino).")
+    uso = {"creado": db.ahora().isoformat(timespec="microseconds"), "fecha": fecha, "movimiento_id": f["movimiento_id"],
+           "transporte_id": f["transporte_id"], "transporte": f["transporte"], "patente": p, "tipo": f["tipo"],
+           "pallets": f["pallets"], "destino": destino, "viaje": _txt(datos.get("viaje"), 60),
+           "planta": _txt(datos.get("planta"), 80), "detalle": _txt(datos.get("detalle"), 300), "usuario": usuario}
+    with closing(db.con()) as c, c:
+        uso["id"] = c.execute(f"INSERT INTO usos ({', '.join(uso)}) VALUES ({', '.join('?' * len(uso))})",
+                              list(uso.values())).lastrowid
+    webhooks.enviar("uso", uso)
+    return uso
+
+
+def anular_uso(uid, usuario):
+    with closing(db.con()) as c, c:
+        r = c.execute("SELECT * FROM usos WHERE id=? AND anulado=0", (uid,)).fetchone()
+        if not r:
+            raise Error("No existe ese uso (o ya estaba anulado).")
+        c.execute("UPDATE usos SET anulado=1, anulado_por=?, anulado_en=? WHERE id=?", (usuario, db.ahora_iso(), uid))
+    webhooks.enviar("uso_anulado", {**dict(r), "anulado_por": usuario})
+
+
+def listar(tabla, desde, hasta, transporte_id=None):
+    assert tabla in ("usos", "movimientos")
+    sql = f"SELECT * FROM {tabla} WHERE fecha BETWEEN ? AND ?"
+    args = [desde, hasta]
+    if transporte_id:
+        sql += " AND transporte_id=?"
+        args.append(transporte_id)
+    with closing(db.con()) as c:
+        return [dict(r) for r in c.execute(sql + " ORDER BY creado DESC LIMIT 20000", args)]
+
+
+# ------------------------------------------------------------------ bloqueos manuales
+def agregar_bloqueo(tipo, clave, motivo, usuario, origen="manual"):
+    if tipo not in ("unidad", "chofer"):
+        raise Error("Tipo inválido.")
+    clave = norm_patente(clave) if tipo == "unidad" else norm_dni(clave)
+    if not clave:
+        raise Error("Revisá la patente o el DNI.")
+    with closing(db.con()) as c, c:
+        c.execute("""INSERT INTO bloqueos (tipo, clave, motivo, origen, activo, creado, creado_por) VALUES (?,?,?,?,1,?,?)
+                     ON CONFLICT(tipo, clave, origen) DO UPDATE SET motivo=excluded.motivo, activo=1,
+                     creado=excluded.creado, creado_por=excluded.creado_por""",
+                  (tipo, clave, _txt(motivo, 300) or None, origen, db.ahora_iso(), usuario))
+
+
+def quitar_bloqueo(bid):
+    with closing(db.con()) as c, c:
+        c.execute("UPDATE bloqueos SET activo=0 WHERE id=?", (bid,))
+
+
+def bloqueos(activos=True):
+    with closing(db.con()) as c:
+        return [dict(r) for r in c.execute(f"SELECT * FROM bloqueos {'WHERE activo=1' if activos else ''} ORDER BY creado DESC")]
+
+
+# ------------------------------------------------------------------ imports (el navegador lee los Excel y manda columnas)
+def _si(v):
+    return 1 if str(v or "").strip().upper() in ("Y", "S", "SI", "SÍ", "YES", "TRUE", "1", "X") else 0
+
+
+def _tipo_equipo(t):
+    t = str(t or "").upper()
+    return "refri" if re.search(r"REF|FRIG|TERM", t) else "seco"
+
+
+def importar_unidades(filas, simular=True):
+    """Exporte de equipos: patente, tipo de equipo, pallets, kg, ejes, bloqueado, doc. vencido, expiración, proveedor."""
+    r = {"leidas": 0, "nuevas": 0, "actualizadas": 0, "bloqueadas": 0, "invalidas": 0, "refri": 0, "seco": 0}
+    with closing(db.con()) as c, c:
+        existentes = {x[0] for x in c.execute("SELECT patente FROM unidades")}
+        vistos = set()
+        for f in filas:
+            p = norm_patente(str(f.get("patente") or "").split("_")[0])
+            if not patente_valida(p) or p in vistos:
+                r["invalidas"] += not patente_valida(p)
+                continue
+            vistos.add(p)
+            num = lambda v: (float(str(v).replace(",", ".")) if re.fullmatch(r"-?\d+([.,]\d+)?", str(v or "").strip()) else None)
+            pal = num(f.get("pallets"))
+            fila = {"patente": p, "nro_proveedor": re.sub(r"\D", "", str(f.get("nro_proveedor") or "").split(".")[0]) or None,
+                    "transportista": _txt(f.get("transportista"), 120), "tipo": _tipo_equipo(f.get("tipo_equipo")),
+                    "tipo_equipo": _txt(f.get("tipo_equipo"), 60),
+                    "pallets": int(pal) if pal and 0 < pal <= 60 else None, "kg_cap": num(f.get("kg")),
+                    "ejes": int(num(f.get("ejes")) or 0) if (num(f.get("ejes")) or 0) <= 10 else None,
+                    "satelital": _si(f.get("satelital")), "dedicado": _si(f.get("dedicado")),
+                    "bloqueado": _si(f.get("bloqueado")), "doc_vencido": _txt(f.get("doc_vencido"), 200) or None,
+                    "fecha_expiracion": _fecha_iso(f.get("expiracion")) or None, "actualizado": db.ahora_iso()}
+            r["leidas"] += 1
+            r["actualizadas" if p in existentes else "nuevas"] += 1
+            r["bloqueadas"] += fila["bloqueado"]
+            r[fila["tipo"]] += 1
+            if not simular:
+                c.execute(f"INSERT OR REPLACE INTO unidades ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
+                          list(fila.values()))
+    return r
+
+
+GCG_FIJAS = {"tipo", "id", "nombredominio", "cuitcuil", "dni", "genero", "pais", "cliente", "locaciones",
+             "tipodecontratista", "estado", "vencimiento", "responsable", "situacion", "contratista", "subcontratista",
+             "matrizdedocumentos", "nivelderiesgo", "ordenesdecompra", "condiciontrabajador"}
+
+
+def importar_gcg(filas, simular=True):
+    """Exporte de GCG: trabajadores (por DNI) y vehículos (por dominio), con estado y vencimiento de cada documento."""
+    r = {"trabajadores": 0, "vehiculos": 0, "no_habilitados": 0, "invalidas": 0, "documentos": 0}
+    ahora = db.ahora_iso()
+    with closing(db.con()) as c, c:
+        vistos = set()
+        for f in filas:
+            es_trab = _clave(f.get("tipo")).startswith("trabajador") or (f.get("dni") and not f.get("tipo"))
+            tipo = "trabajador" if es_trab else "vehiculo"
+            clave = norm_dni(f.get("dni")) if es_trab else norm_patente(f.get("nombre"))
+            if not clave or (tipo == "vehiculo" and not patente_valida(clave)) or (tipo, clave) in vistos:
+                r["invalidas"] += not clave
+                continue
+            vistos.add((tipo, clave))
+            docs = {k: v for k, v in (f.get("documentos") or {}).items() if str(v or "").strip() not in ("", "-")}
+            estado = _txt(f.get("estado"), 40).upper()
+            fila = {"tipo": tipo, "clave": clave, "nombre": " ".join(str(f.get("nombre") or "").replace(",", " ").split()).title()[:120],
+                    "cuil": re.sub(r"\D", "", str(f.get("cuil") or ""))[:11] or None, "estado": estado or None,
+                    "contratista": _txt(f.get("contratista"), 120) or None,
+                    "subcontratista": _txt(f.get("subcontratista"), 120) or None,
+                    "vencimiento": _fecha_iso(f.get("vencimiento")) or None,
+                    "documentos": json.dumps(docs, ensure_ascii=False), "actualizado": ahora}
+            r["trabajadores" if es_trab else "vehiculos"] += 1
+            r["no_habilitados"] += estado not in ("", "HABILITADO")
+            r["documentos"] += len(docs)
+            if not simular:
+                c.execute(f"INSERT OR REPLACE INTO gcg ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
+                          list(fila.values()))
+    return r
+
+
+def importar_bloqueados(filas, usuario, simular=True, reemplazar=True):
+    """Lista de bloqueados (patente y/o DNI + motivo). reemplazar: la lista nueva reemplaza a la anterior volcada."""
+    r = {"unidades": 0, "choferes": 0, "invalidas": 0, "desactivados": 0}
+    nuevos = []
+    for f in filas:
+        p, d = norm_patente(f.get("patente")), norm_dni(f.get("dni"))
+        motivo = _txt(f.get("motivo"), 300)
+        ok = False
+        if p and patente_valida(p):
+            nuevos.append(("unidad", p, motivo)); r["unidades"] += 1; ok = True
+        if d:
+            nuevos.append(("chofer", d, motivo)); r["choferes"] += 1; ok = True
+        r["invalidas"] += not ok
+    if simular:
+        with closing(db.con()) as c:
+            r["desactivados"] = c.execute("SELECT COUNT(*) FROM bloqueos WHERE origen='lista' AND activo=1").fetchone()[0] if reemplazar else 0
+        return r
+    with closing(db.con()) as c, c:
+        if reemplazar:
+            r["desactivados"] = c.execute("UPDATE bloqueos SET activo=0 WHERE origen='lista' AND activo=1").rowcount
+    for tipo, clave, motivo in nuevos:
+        agregar_bloqueo(tipo, clave, motivo, usuario, origen="lista")
+    return r
+
+
+# ------------------------------------------------------------------ panel: rango de fechas (Desde / Hasta)
+def rango(desde, hasta):
+    """Cierre de cada día del rango (con movimientos) + los movimientos y usos del rango."""
+    d0, d1 = date.fromisoformat(desde), date.fromisoformat(hasta)
+    if d1 < d0:
+        d0, d1 = d1, d0
+    if (d1 - d0).days > 92:
+        raise Error("El rango máximo es de 3 meses.")
+    with closing(db.con()) as c:
+        dias = [r[0] for r in c.execute("SELECT DISTINCT fecha FROM movimientos WHERE fecha BETWEEN ? AND ? ORDER BY fecha DESC",
+                                        (d0.isoformat(), d1.isoformat()))]
+        tts = [{k: t[k] for k in ("id", "nombre", "nro_proveedor", "token", "cuota_dia", "telefono", "activo")}
+               for t in c.execute("SELECT * FROM transportes ORDER BY nombre COLLATE NOCASE")]
+    cierres = []
+    for d in dias:
+        e = estado_dia(d)
+        cierres.append({"fecha": d, "filas": e["filas"]})
+    return {"desde": d0.isoformat(), "hasta": d1.isoformat(), "dias": cierres, "transportes": tts,
+            "movimientos": listar("movimientos", d0.isoformat(), d1.isoformat()),
+            "usos": listar("usos", d0.isoformat(), d1.isoformat())}

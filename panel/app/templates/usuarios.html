@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block titulo %}Usuarios · Disponible{% endblock %}
+{% block contenido %}
+<div class="tarjeta">
+  <h1>Usuarios del panel</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if nuevo %}
+  <p class="aviso">Contraseña temporal de <b>{{ nuevo[0] }}</b>: <code class="clave">{{ nuevo[1] }}</code><br>
+    Pasásela por un medio seguro: se muestra una sola vez y la tiene que cambiar al entrar.</p>
+  {% endif %}
+  <div class="tabla-scroll">
+  <table>
+    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Último ingreso (UTC)</th><th></th></tr></thead>
+    <tbody>
+    {% for x in usuarios %}
+      <tr class="{{ '' if x.activo else 'apagado' }}">
+        <td>{{ x.usuario }}</td><td>{{ x.nombre or '' }}</td>
+        <td>{% if x.usuario != u.usuario %}
+          <form method="post" class="fila-rol"><input type="hidden" name="accion" value="rol"><input type="hidden" name="usuario" value="{{ x.usuario }}">
+            <select name="rol">{% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if (x.rol or 'consulta') == k }}>{{ v }}</option>{% endfor %}</select>
+            <button class="chico">Cambiar</button></form>
+          {% else %}{{ roles[x.rol] if x.rol else 'Administrador' }}{% endif %}</td>
+        <td>{{ 'Activo' if x.activo else 'Desactivado' }}</td><td>{{ x.ultimo_ingreso or '—' }}</td>
+        <td class="acciones">{% if x.usuario != u.usuario %}
+          <form method="post"><input type="hidden" name="usuario" value="{{ x.usuario }}">
+            <button name="accion" value="blanquear" class="chico">Nueva contraseña</button>
+            {% if x.activo %}<button name="accion" value="desactivar" class="chico">Desactivar</button>
+            {% else %}<button name="accion" value="activar" class="chico">Activar</button>{% endif %}
+          </form>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+<div class="tarjeta">
+  <h2>Agregar usuario</h2>
+  <form method="post" class="fila-form">
+    <input type="hidden" name="accion" value="crear">
+    <label>Usuario<input name="usuario" placeholder="ej. mgomez" autocapitalize="none" required></label>
+    <label>Nombre<input name="nombre" placeholder="María Gómez"></label>
+    <label>Rol<select name="rol">
+      <option value="operador">Operador (usa unidades, transportes, importa)</option>
+      <option value="consulta">Consulta (solo mira)</option>
+      <option value="admin">Administrador (todo, también usuarios)</option></select></label>
+    <label id="nuevo-t" hidden>Transporte<select name="transporte_id"><option value="">—</option>
+      {% for t in transportes %}<option value="{{ t.id }}">{{ t.nombre }}</option>{% endfor %}</select></label>
+    <button class="primario">Crear</button>
+  </form>
+</div>
+{% endblock %}

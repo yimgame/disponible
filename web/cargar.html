@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Disponible</title>
+<style>
+  /* Formulario de campo: una columna, botones grandes para el pulgar, colores de semáforo para el estado */
+  :root {
+    --bg: #f3f5f2; --card: #ffffff; --fg: #1d2620; --muted: #5d6b62; --line: #d9dfd9;
+    --accent: #1f6f4a; --accent-fg: #ffffff; --refri: #1d5fa8; --seco: #9a6a12; --bad: #b3261e; --bad-bg: #fbeceb;
+    --ok-bg: #e5f3ea; --warn: #8a5a00; --warn-bg: #fdf1d8;
+    --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121614; --card: #1b201d; --fg: #e6ece7; --muted: #9aa79f; --line: #2c342f;
+      --accent: #3fa774; --accent-fg: #0d1410; --refri: #6aa8ef; --seco: #e0aa48; --bad: #f08a80; --bad-bg: #3a1f1d; --ok-bg: #1d3327; --warn: #f1c35e; --warn-bg: #3a2f14; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.4 var(--sans); }
+  main { max-width: 34rem; margin: 0 auto; padding: 1rem 16px 3rem; display: grid; gap: 1rem; }
+  header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.01em; }
+  header p { margin: .2rem 0 0; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; display: grid; gap: .8rem; }
+  .card h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  label { display: grid; gap: .3rem; font-weight: 600; font-size: .9rem; }
+  input, button { font: inherit; }
+  input[type=text], input[type=number], input[type=datetime-local], input[type=tel] { width: 100%; padding: .8rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 1.1rem; }
+  #patente { font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .seg button { padding: .8rem; border-radius: 10px; border: 2px solid var(--line); background: var(--bg); color: var(--fg); font-weight: 700; cursor: pointer; }
+  .seg button[aria-pressed=true][data-v=refri] { border-color: var(--refri); color: var(--refri); }
+  .seg button[aria-pressed=true][data-v=seco] { border-color: var(--seco); color: var(--seco); }
+  .acciones { display: grid; grid-template-columns: 2fr 1fr; gap: .5rem; }
+  .btn { padding: 1rem; border: 0; border-radius: 12px; font-weight: 800; font-size: 1.05rem; cursor: pointer; }
+  .btn.si { background: var(--accent); color: var(--accent-fg); }
+  .btn.no { background: var(--bad-bg); color: var(--bad); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .resumen { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; text-align: center; }
+  .resumen div { background: var(--bg); border-radius: 10px; padding: .6rem .3rem; }
+  .resumen b { display: block; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+  .resumen small { color: var(--muted); }
+  .r b { color: var(--refri); } .s b { color: var(--seco); }
+  .cuota { font-weight: 700; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+  li { display: flex; align-items: center; gap: .6rem; padding: .55rem .6rem; border-radius: 10px; background: var(--bg); }
+  li .pat { font-family: var(--mono); font-weight: 700; min-width: 6.5rem; }
+  li .det { color: var(--muted); flex: 1; font-size: .9rem; }
+  li button { border: 0; border-radius: 8px; padding: .45rem .7rem; font-weight: 700; cursor: pointer; background: var(--bad-bg); color: var(--bad); }
+  .tag { font-size: .75rem; font-weight: 800; padding: .1rem .4rem; border-radius: 6px; text-transform: uppercase; }
+  .tag.refri { color: var(--refri); border: 1px solid var(--refri); } .tag.seco { color: var(--seco); border: 1px solid var(--seco); }
+  .bloq { margin: 0; padding: .6rem .8rem; border-radius: 10px; background: var(--bad-bg); color: var(--bad); font-weight: 600; font-size: .9rem; }
+  .avis { margin: 0; padding: .6rem .8rem; border-radius: 10px; background: var(--warn-bg, #fdf1d8); color: var(--warn, #8a5a00); font-weight: 600; font-size: .9rem; }
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  li.usada { opacity: .65; } li .usado { font-size: .8rem; font-weight: 700; color: var(--muted); }
+  .hint { font-weight: 400; color: var(--muted); font-size: .8rem; }
+  #msg { padding: .8rem; border-radius: 10px; font-weight: 600; }
+  #msg.ok { background: var(--ok-bg); } #msg.err { background: var(--bad-bg); color: var(--bad); }
+  .vacio { color: var(--muted); margin: 0; }
+  @media (prefers-reduced-motion: no-preference) { #msg { transition: opacity .3s; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="titulo">Disponible</h1>
+    <p id="sub">Cargando…</p>
+  </header>
+
+  <div id="msg" hidden></div>
+
+  <section class="card" id="form" hidden>
+    <h2>Informar unidad</h2>
+    <label for="patente">Patente
+      <input id="patente" type="text" list="mis-unidades" autocomplete="off" placeholder="AB123CD" maxlength="10">
+    </label>
+    <datalist id="mis-unidades"></datalist>
+    <div id="alertas" hidden></div>
+    <div>
+      <div class="seg" role="group" aria-label="Tipo">
+        <button type="button" data-v="refri" aria-pressed="false">❄ Refrigerado</button>
+        <button type="button" data-v="seco" aria-pressed="false">Seco</button>
+      </div>
+    </div>
+    <label for="pallets">Pallets
+      <input id="pallets" type="number" inputmode="numeric" min="1" max="40" placeholder="ej. 26">
+    </label>
+    <label for="eta">Llegada estimada (ETA) <span class="hint">fecha y hora en que la unidad llega a cargar</span>
+      <input id="eta" type="datetime-local">
+    </label>
+    <label for="chofer">DNI del chofer (opcional)
+      <input id="chofer" type="tel" inputmode="numeric" maxlength="12" placeholder="ej. 30123456" autocomplete="off">
+    </label>
+    <label for="comentario">Comentario (opcional)
+      <input id="comentario" type="text" maxlength="200" placeholder="ej. se rompió, sin chofer…">
+    </label>
+    <div class="acciones">
+      <button class="btn si" id="btn-si" type="button">✔ Disponible</button>
+      <button class="btn no" id="btn-no" type="button">Sacar</button>
+    </div>
+  </section>
+
+  <section class="card" id="hoy" hidden>
+    <h2>Tu disponible de hoy</h2>
+    <div class="resumen">
+      <div><b id="t-u">0</b><small>unidades</small></div>
+      <div class="r"><b id="t-r">0</b><small>refri · <span id="t-rp">0</span> pl</small></div>
+      <div class="s"><b id="t-s">0</b><small>seco · <span id="t-sp">0</span> pl</small></div>
+    </div>
+    <p class="cuota" id="cuota" hidden></p>
+    <ul id="lista"></ul>
+  </section>
+</main>
+<script>
+const T = new URLSearchParams(location.search).get('t') || '';
+const API = '/panel/publico/t/' + encodeURIComponent(T);
+let unidades = {}, tipo = '';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function aviso(texto, ok) { const m = $('msg'); m.textContent = texto; m.className = ok ? 'ok' : 'err'; m.hidden = false;
+  clearTimeout(aviso.t); aviso.t = setTimeout(() => { m.hidden = true; }, 7000); }
+function setTipo(v) { tipo = v; document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
+const norm = p => p.replace(/[\s.\-]/g, '').toUpperCase();
+const fh = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}` : '';
+function ahoraLocal(min = 0) { const d = new Date(Date.now() + min * 60000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
+
+function pintar(d) {
+  $('titulo').textContent = 'Disponible · ' + d.transporte;
+  $('sub').textContent = 'Hoy ' + d.fecha.split('-').reverse().join('/') + ' — cargá cada unidad que tengas para despachar';
+  if (d.unidades && d.unidades.length) {
+    unidades = Object.fromEntries(d.unidades.map(u => [u.patente, u]));
+    $('mis-unidades').innerHTML = Object.values(unidades).map(u => `<option value="${u.patente}">${u.tipo === 'refri' ? 'Refri' : 'Seco'} · ${u.pallets || '?'} pl${u.bloqueado ? ' · bloqueada' : ''}</option>`).join('');
+  }
+  const disp = d.filas.filter(f => f.estado === 'disponible'), usadas = d.filas.filter(f => f.estado === 'usada');
+  const sum = (arr, t) => arr.filter(f => f.tipo === t);
+  const pl = arr => arr.reduce((a, f) => a + (Number(f.pallets) || 0), 0);
+  $('t-u').textContent = disp.length; $('t-r').textContent = sum(disp, 'refri').length; $('t-rp').textContent = pl(sum(disp, 'refri'));
+  $('t-s').textContent = sum(disp, 'seco').length; $('t-sp').textContent = pl(sum(disp, 'seco'));
+  const cargadas = disp.length + usadas.length;
+  if (d.cuota) { $('cuota').hidden = false; const f = Math.max(0, d.cuota - cargadas);
+    $('cuota').textContent = f ? `Cuota del día: ${cargadas} de ${d.cuota} — faltan ${f}` : `Cuota del día cumplida: ${cargadas} de ${d.cuota} ✔`; }
+  $('lista').innerHTML = d.filas.length ? d.filas.map(a => a.estado === 'usada'
+      ? `<li class="usada"><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span><span class="det">${a.pallets} pl</span><span class="usado">✔ ya se usó</span></li>`
+      : `<li><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span>
+         <span class="det">${a.pallets} pl${a.eta ? ' · llega ' + fh(a.eta) : ''}${a.bloqueado ? ' · ⛔ bloqueada' : ''}</span>
+         <button type="button" data-sacar="${esc(a.patente)}" data-tipo="${a.tipo}" data-pallets="${a.pallets}">Sacar</button></li>`).join('')
+    : '<li class="vacio">Todavía no informaste unidades hoy.</li>';
+  $('form').hidden = false; $('hoy').hidden = false;
+}
+
+async function cargar() {
+  if (!T) { $('sub').textContent = 'Falta el código del link. Pedile el link a tu analista de transporte.'; return; }
+  try { const r = await fetch(API); const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || d.detail || 'Link inválido'); pintar(d);
+  } catch (e) { $('sub').textContent = e.message + '. Pedile el link nuevo a tu analista.'; }
+}
+
+function mostrarAlertas(al) {
+  const c = $('alertas');
+  c.innerHTML = (al || []).map(a => `<p class="${a.nivel === 'bloqueo' ? 'bloq' : 'avis'}">${a.nivel === 'bloqueo' ? '⛔' : '⚠'} ${esc(a.texto)}</p>`).join('') +
+    ((al || []).some(a => a.nivel === 'bloqueo') ? '<p class="avis">Igual podés informarla: queda marcada como bloqueada en el disponible.</p>' : '');
+  c.hidden = !c.innerHTML; c.style.display = c.hidden ? '' : 'grid'; c.style.gap = '.4rem';
+}
+let tAlert;
+function revisar() {
+  clearTimeout(tAlert);
+  tAlert = setTimeout(async () => {
+    const p = norm($('patente').value), dni = $('chofer').value.replace(/\D/g, '');
+    if (!/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(p)) { mostrarAlertas([]); return; }
+    try { const r = await fetch(`${API}/alertas?patente=${encodeURIComponent(p)}&dni=${encodeURIComponent(dni)}`); const d = await r.json();
+      mostrarAlertas(d.alertas);
+      if (d.unidad && !unidades[p]) { if (d.unidad.tipo) setTipo(d.unidad.tipo); if (d.unidad.pallets && !$('pallets').value) $('pallets').value = d.unidad.pallets; }
+    } catch { /* sin conexión: se valida al enviar */ }
+  }, 350);
+}
+
+async function enviar(accion, item) {
+  const btns = [$('btn-si'), $('btn-no')]; btns.forEach(b => b.disabled = true);
+  try {
+    const r = await fetch(`${API}/movimiento`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accion, ...item, comentario: $('comentario').value.trim() }) });
+    const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.error || 'No se pudo guardar');
+    const bloq = (d.alertas || []).some(a => a.nivel === 'bloqueo');
+    aviso((accion === 'agrega' ? (bloq ? '⛔ Cargada como BLOQUEADA: ' : '✔ Disponible: ') : '✖ Sacada: ') + item.patente, !bloq);
+    $('patente').value = ''; $('pallets').value = ''; $('comentario').value = ''; $('chofer').value = ''; mostrarAlertas([]); setTipo(''); pintar(d);
+  } catch (e) { aviso(e.message, false); } finally { btns.forEach(b => b.disabled = false); }
+}
+
+function leerForm(accion) {
+  const patente = norm($('patente').value), pallets = Number($('pallets').value);
+  if (!/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(patente)) { aviso('Revisá la patente (ej. AB123CD o ABC123)', false); return null; }
+  if (accion === 'quita') return { patente };
+  if (!tipo) { aviso('Elegí si es Refrigerado o Seco', false); return null; }
+  if (!(pallets >= 1 && pallets <= 40)) { aviso('Poné la cantidad de pallets (1 a 40)', false); return null; }
+  const dni = $('chofer').value.replace(/\D/g, '');
+  if (dni && !/^\d{6,12}$/.test(dni)) { aviso('Revisá el DNI del chofer', false); return null; }
+  return { patente, tipo, pallets, eta: $('eta').value, chofer_dni: dni };
+}
+
+$('patente').addEventListener('input', () => { const u = unidades[norm($('patente').value)];
+  if (u) { setTipo(u.tipo); $('pallets').value = u.pallets || ''; } revisar(); });
+$('chofer').addEventListener('input', revisar);
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setTipo(b.dataset.v)));
+$('btn-si').addEventListener('click', () => { const i = leerForm('agrega'); if (i) enviar('agrega', i); });
+$('btn-no').addEventListener('click', () => { const i = leerForm('quita'); if (i) enviar('quita', i); });
+$('lista').addEventListener('click', e => { const b = e.target.closest('[data-sacar]'); if (!b) return;
+  if (confirm('¿Sacar ' + b.dataset.sacar + ' del disponible?')) enviar('quita', { patente: b.dataset.sacar }); });
+$('eta').min = ahoraLocal(-24 * 60); $('eta').value = ahoraLocal(60);
+cargar();
+</script>
+</body>
+</html>

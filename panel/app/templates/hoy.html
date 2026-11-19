@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block titulo %}Panel de Disponible{% endblock %}
+{% block contenido %}
+{% set gestion = 'gestion' in u.puede %}
+  <header>
+    <h1>Disponible de unidades</h1>
+    <p class="sub">Lo que informan los transportes desde su link. <span id="estado"></span></p>
+  </header>
+
+  <section class="card">
+    <div class="filtros">
+      <label for="desde">Desde <input type="date" id="desde"></label>
+      <label for="hasta">Hasta <input type="date" id="hasta"></label>
+      <label for="f-tte">Transporte <select id="f-tte"><option value="">Todos</option></select></label>
+      <div class="rap">
+        <button type="button" data-r="hoy">Hoy</button><button type="button" data-r="ayer">Ayer</button>
+        <button type="button" data-r="7">7 días</button><button type="button" data-r="mes">Este mes</button>
+      </div>
+      <button type="button" class="pri" id="btn-ver">Ver</button>
+      <button type="button" id="btn-csv">Bajar CSV</button>
+    </div>
+  </section>
+
+  <section class="kpis" aria-label="Totales">
+    <div class="kpi"><b id="k-u">–</b><span id="k-u-l">unidades disponibles</span></div>
+    <div class="kpi r"><b id="k-r">–</b><span>refri · <span id="k-rp">–</span> pallets</span></div>
+    <div class="kpi s"><b id="k-s">–</b><span>seco · <span id="k-sp">–</span> pallets</span></div>
+    <div class="kpi u"><b id="k-us">–</b><span>usadas · se descuentan</span></div>
+    <div class="kpi b"><b id="k-b">–</b><span>bloqueadas en el disponible</span></div>
+    <div class="kpi"><b id="k-mov">–</b><span>puestas <span class="agrega" id="k-put">–</span> · sacadas <span class="quita" id="k-sac">–</span></span></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2 id="h-tte">Por transporte</h2>
+      <div class="tabla"><table>
+        <thead><tr><th>Transporte</th><th class="n">Unid.</th><th class="n">Refri</th><th class="n">Seco</th><th class="n">Pallets</th>
+          <th class="n">Usadas</th><th class="n">Puso</th><th class="n">Sacó</th><th>Cuota</th><th></th></tr></thead>
+        <tbody id="t-tte"></tbody>
+      </table></div>
+    </section>
+    <section class="card">
+      <h2>Por día</h2>
+      <div class="tabla"><table>
+        <thead><tr><th>Fecha</th><th class="n">Unid.</th><th class="n">Refri u/pl</th><th class="n">Seco u/pl</th><th class="n">Usadas</th><th class="n">Puso</th><th class="n">Sacó</th></tr></thead>
+        <tbody id="t-dia"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <section class="card" id="sec-unidades">
+    <h2 id="h-uni">Unidades del día</h2>
+    <div class="filtros" style="margin-bottom:.6rem">
+      <label>Ver <select id="f-est"><option value="">Disponibles y usadas</option><option value="disponible">Solo las que quedan</option>
+        <option value="usada">Solo las usadas</option><option value="bloq">Solo bloqueadas</option></select></label>
+      <label>Buscar <input id="f-q" type="search" placeholder="Patente, chofer…"></label>
+    </div>
+    <div class="tabla"><table>
+      <thead><tr><th>Patente</th><th>Transporte</th><th>Tipo</th><th class="n">Pallets</th><th>ETA</th><th>Chofer</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="t-uni"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <div class="filtros" style="justify-content:space-between;margin-bottom:.4rem"><h2 style="margin:0">Usos <span class="suave">— dónde se usó cada unidad</span></h2>
+      <button type="button" id="btn-csv-usos" class="chico">Bajar usos CSV</button></div>
+    <div class="tabla"><table>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th>Destino</th><th>Viaje / orden</th><th>Planta</th><th>Detalle</th><th>Quién</th><th></th></tr></thead>
+      <tbody id="t-usos"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <h2>Movimientos</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th class="n">Pallets</th><th>Acción</th><th>ETA</th><th>Chofer</th><th>Comentario</th></tr></thead>
+      <tbody id="t-mov"></tbody>
+    </table></div>
+  </section>
+
+  {% if gestion %}
+  <section class="card">
+    <h2>Transportes, links y cuotas</h2>
+    <form class="filtros" id="alta">
+      <label for="a-tte">Transporte (elegí de la lista) <input id="a-tte" required list="lista-ttes" placeholder="Transportes Ejemplo SA" autocomplete="off"></label>
+      <datalist id="lista-ttes"></datalist>
+      <label for="a-cuota">Cuota diaria (unidades) <input id="a-cuota" type="number" min="0" max="200" placeholder="10"></label>
+      <label for="a-tel">Celular (WhatsApp) <input id="a-tel" placeholder="5491122334455"></label>
+      <button class="pri" type="submit">Guardar transporte</button>
+    </form>
+    <p class="vacio">Elegí el nombre de la lista (sale del maestro de unidades) para que el transporte vea sus unidades en el autocompletar.
+      Para cambiar la cuota o el celular, cargalo de nuevo con el mismo nombre: el link no cambia. Más opciones en <a href="{{ P }}/transportes">Transportes</a>.</p>
+  </section>
+  {% endif %}
+
+<dialog id="d-usar">
+  <form method="dialog" id="f-usar">
+    <h2 style="margin:0">Usar <span id="u-patente" class="pat"></span></h2>
+    <p class="suave" id="u-info" style="margin:0"></p>
+    <p class="error" id="u-bloq" hidden></p>
+    <label>Destino (dónde se usó)<input id="u-destino" required maxlength="120" placeholder="ej. CD Pilar, cliente X, Rosario"></label>
+    <div class="dos-col">
+      <label>Viaje / orden<input id="u-viaje" maxlength="60" placeholder="ej. 4501234"></label>
+      <label>Planta / origen<input id="u-planta" maxlength="80" placeholder="ej. Planta Arroyito"></label>
+    </div>
+    <label>Detalle<textarea id="u-detalle" rows="2" maxlength="300"></textarea></label>
+    <p class="error" id="u-error" hidden></p>
+    <div class="rap"><button class="pri" value="ok">✔ Registrar uso</button><button value="cancelar" formnovalidate>Cancelar</button></div>
+  </form>
+</dialog>
+
+<script>
+const P = "{{ P }}", GESTION = {{ 'true' if gestion else 'false' }};
+const BASE_CARGA = location.origin + '/cargar';
+const TZ = 'America/Argentina/Buenos_Aires';
+const $ = id => document.getElementById(id);
+let datos = { dias: [], movimientos: [], usos: [], transportes: [] };
+
+const fechaAR = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+const sumarDias = (f, n) => { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const dmy = f => f ? f.split('-').reverse().join('/') : '';
+const fh = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}` : '';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function rango(r) { const h = fechaAR();
+  const m = { hoy: [h, h], ayer: [sumarDias(h, -1), sumarDias(h, -1)], 7: [sumarDias(h, -6), h], mes: [h.slice(0, 8) + '01', h] }[r];
+  $('desde').value = m[0]; $('hasta').value = m[1]; ver(); }
+
+const vacio = () => ({ u: 0, p: 0, ru: 0, rp: 0, su: 0, sp: 0, us: 0, b: 0, puso: 0, saco: 0 });
+// "u" = disponibles al cierre (las usadas se descuentan); "us" = usadas
+function sumar(acc, f) {
+  if (f.estado === 'usada') { acc.us++; return; }
+  const p = Number(f.pallets) || 0; acc.u++; acc.p += p; acc.b += f.bloqueado ? 1 : 0;
+  if (f.tipo === 'refri') { acc.ru++; acc.rp += p; } else { acc.su++; acc.sp += p; }
+}
+
+async function ver() {
+  $('estado').textContent = 'Actualizando…';
+  try {
+    const r = await fetch(`${P}/api/rango?desde=${$('desde').value}&hasta=${$('hasta').value}`, { credentials: 'same-origin' });
+    const d = await r.json();
+    if (!r.ok || d.ok === false) throw new Error(d.error || 'Error ' + r.status);
+    datos = d; pintar();
+    $('estado').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) { $('estado').textContent = 'No se pudo actualizar (' + e.message + ')'; }
+}
+
+function pintar() {
+  const fT = $('f-tte').value, tts = datos.transportes || [];
+  const sel = $('f-tte'), prev = sel.value;
+  const nombres = [...new Set([...tts.filter(t => t.activo).map(t => t.nombre), ...datos.movimientos.map(m => m.transporte)])].sort();
+  sel.innerHTML = '<option value="">Todos</option>' + nombres.map(n => `<option ${n === prev ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const movs = datos.movimientos.filter(m => !fT || m.transporte === fT);
+  const usos = datos.usos.filter(x => !fT || x.transporte === fT);
+  const unDia = $('desde').value === $('hasta').value;
+  const tot = vacio(), porT = {}, porD = [];
+  for (const dia of datos.dias) {
+    const x = vacio();
+    for (const f of dia.filas.filter(f => !fT || f.transporte === fT)) { sumar(x, f); sumar(tot, f); sumar(porT[f.transporte] ||= vacio(), f); }
+    for (const m of movs.filter(m => m.fecha === dia.fecha)) { const k = m.accion === 'quita' ? 'saco' : 'puso'; x[k]++; tot[k]++; (porT[m.transporte] ||= vacio())[k]++; }
+    porD.push([dia.fecha, x]);
+  }
+  $('k-u-l').textContent = unDia ? 'unidades disponibles' : 'unidades-día disponibles en el rango';
+  $('k-u').textContent = tot.u; $('k-r').textContent = tot.ru; $('k-rp').textContent = tot.rp; $('k-s').textContent = tot.su; $('k-sp').textContent = tot.sp;
+  $('k-us').textContent = tot.us; $('k-b').textContent = tot.b;
+  $('k-mov').textContent = tot.puso + tot.saco; $('k-put').textContent = tot.puso; $('k-sac').textContent = tot.saco;
+  $('h-tte').textContent = unDia ? 'Por transporte — ' + dmy($('hasta').value) : 'Por transporte — suma del rango';
+  const filasT = nombres.filter(n => !fT || n === fT).map(n => {
+    const x = porT[n] || vacio(), t = tts.find(t => t.nombre === n) || {};
+    const cargadas = x.u + x.us;     // la cuota se cumple con lo que pusieron (aunque después se haya usado)
+    const cuota = Number(t.cuota_dia) || 0, meta = cuota * (unDia ? 1 : Math.max(1, datos.dias.length));
+    const chip = !cuota ? '<span class="chip na">sin cuota</span>' : cargadas >= meta ? `<span class="chip ok">${cargadas}/${meta} ✔</span>`
+      : cargadas >= meta / 2 ? `<span class="chip warn">${cargadas}/${meta}</span>` : `<span class="chip bad">${cargadas}/${meta}</span>`;
+    const link = t.token ? `${BASE_CARGA}?t=${t.token}` : '';
+    const wa = t.telefono && link ? `https://wa.me/${String(t.telefono).replace(/\D/g, '')}?text=${encodeURIComponent(`Hola! Hoy llevan ${cargadas}${cuota ? ' de ' + cuota : ''} unidades de disponible. Cargá el resto acá: ${link}`)}` : '';
+    return `<tr><td>${esc(n)}</td><td class="n">${x.u}</td><td class="n refri">${x.ru}<small> / ${x.rp}pl</small></td><td class="n seco">${x.su}<small> / ${x.sp}pl</small></td>
+      <td class="n">${x.p}</td><td class="n usa">${x.us}</td><td class="n agrega">${x.puso}</td><td class="n quita">${x.saco}</td><td>${chip}</td>
+      <td><div class="acc">${link ? `<button type="button" data-copiar="${link}">Copiar link</button>` : ''}${wa ? `<a href="${wa}" target="_blank" rel="noopener">Correr por WhatsApp</a>` : ''}</div></td></tr>`;
+  });
+  $('t-tte').innerHTML = filasT.join('') || '<tr><td colspan="10" class="vacio">Sin transportes todavía. Cargá uno abajo.</td></tr>';
+  $('t-dia').innerHTML = porD.map(([d, x]) => `<tr><td>${dmy(d)}</td><td class="n">${x.u}</td><td class="n refri">${x.ru} / ${x.rp}</td><td class="n seco">${x.su} / ${x.sp}</td><td class="n usa">${x.us}</td><td class="n agrega">${x.puso}</td><td class="n quita">${x.saco}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="vacio">Sin movimientos en estas fechas.</td></tr>';
+  pintarUnidades();
+  $('t-usos').innerHTML = usos.map(x => `<tr class="${x.anulado ? 'apagado' : ''}"><td class="nw">${dmy(x.fecha)}</td><td>${esc(x.creado.slice(11, 16))}</td><td>${esc(x.transporte)}</td>
+    <td class="pat">${esc(x.patente)}</td><td class="${x.tipo}">${esc(x.tipo)}</td><td><b>${esc(x.destino)}</b></td><td>${esc(x.viaje)}</td><td>${esc(x.planta)}</td>
+    <td>${esc(x.detalle)}</td><td>${esc(x.usuario)}</td><td>${x.anulado ? `<span class="chip na">anulado</span>` : (GESTION ? `<div class="acc"><button type="button" data-anular="${x.id}">↩ Anular</button></div>` : '')}</td></tr>`).join('')
+    || '<tr><td colspan="11" class="vacio">Todavía no se usó ninguna unidad en estas fechas.</td></tr>';
+  $('t-mov').innerHTML = [...movs].sort((a, b) => String(b.creado).localeCompare(String(a.creado))).map(m => `<tr><td class="nw">${dmy(m.fecha)}</td><td>${esc(m.hora)}</td><td>${esc(m.transporte)}</td>
+    <td class="pat">${esc(m.patente)}${m.bloqueado ? ' <span class="chip bad" title="' + esc(m.bloqueo_motivo) + '">bloq.</span>' : ''}</td><td class="${m.tipo}">${esc(m.tipo)}</td><td class="n">${m.pallets ?? ''}</td>
+    <td class="${m.accion}">${m.accion === 'quita' ? 'Sacó' : 'Puso'}</td><td class="nw">${fh(m.eta)}</td><td>${esc(m.chofer_nombre || m.chofer_dni)}</td><td>${esc(m.comentario)}</td></tr>`).join('')
+    || '<tr><td colspan="10" class="vacio">Sin movimientos en estas fechas.</td></tr>';
+}
+
+function pintarUnidades() {
+  const unDia = $('desde').value === $('hasta').value;
+  $('sec-unidades').hidden = !unDia;
+  if (!unDia) return;
+  const dia = datos.dias.find(d => d.fecha === $('hasta').value);
+  const fT = $('f-tte').value, est = $('f-est').value, q = $('f-q').value.trim().toLowerCase();
+  const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : f.estado === est)) &&
+    (!q || [f.patente, f.chofer_nombre, f.chofer_dni].join(' ').toLowerCase().includes(q)));
+  $('h-uni').textContent = `Unidades del ${dmy($('hasta').value)} — ${filas.length}`;
+  $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
+    <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
+    <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
+    <td>${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
+    <td>${f.estado === 'usada' ? `<span class="chip warn">Usada</span><div class="suave">→ ${esc(f.uso.destino)}${f.uso.viaje ? ' · ' + esc(f.uso.viaje) : ''}</div>` : '<span class="chip ok">Disponible</span>'}
+      ${f.bloqueado ? `<div class="bloq">⛔ ${esc(f.bloqueo_motivo)}</div>` : ''}${f.comentario ? `<div class="suave">“${esc(f.comentario)}”</div>` : ''}</td>
+    <td>${GESTION ? `<div class="acc">${f.estado === 'disponible' ? `<button type="button" class="pri" data-usar="${esc(f.patente)}">Usar</button>` :
+        `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular uso</button>`}</div>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="8" class="vacio">No hay unidades con ese filtro.</td></tr>';
+}
+
+function csv() {
+  const fT = $('f-tte').value, filas = datos.movimientos.filter(m => !fT || m.transporte === fT);
+  const c = ['fecha', 'hora', 'transporte', 'patente', 'tipo', 'pallets', 'accion', 'eta', 'chofer_dni', 'chofer', 'bloqueado', 'motivo_bloqueo', 'comentario'];
+  const txt = [c.join(';'), ...filas.map(m => [m.fecha, m.hora, m.transporte, m.patente, m.tipo, m.pallets, m.accion === 'quita' ? 'saco' : 'puso', m.eta, m.chofer_dni, m.chofer_nombre,
+    m.bloqueado ? 'si' : '', m.bloqueo_motivo, m.comentario].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';'))].join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + txt], { type: 'text/csv' }));
+  a.download = `disponible_${$('desde').value}_${$('hasta').value}.csv`; a.click();
+}
+
+// --- usar / anular
+let usando = null;
+function abrirUso(patente) {
+  const dia = datos.dias.find(d => d.fecha === $('hasta').value), f = dia.filas.find(x => x.patente === patente); usando = f;
+  $('u-patente').textContent = patente;
+  $('u-info').textContent = `${f.transporte} · ${f.tipo === 'refri' ? 'Refrigerado' : 'Seco'} · ${f.pallets} pallets${f.eta ? ' · ETA ' + fh(f.eta) : ''}`;
+  $('u-bloq').hidden = !f.bloqueado; $('u-bloq').textContent = '⛔ Atención: ' + (f.bloqueo_motivo || '');
+  ['u-destino', 'u-viaje', 'u-planta', 'u-detalle'].forEach(id => ($(id).value = '')); $('u-error').hidden = true;
+  $('d-usar').showModal(); $('u-destino').focus();
+}
+$('f-usar').addEventListener('submit', async e => {
+  if (e.submitter && e.submitter.value === 'cancelar') return;
+  e.preventDefault();
+  const r = await fetch(P + '/api/usar', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patente: usando.patente, fecha: $('hasta').value, destino: $('u-destino').value, viaje: $('u-viaje').value,
+                           planta: $('u-planta').value, detalle: $('u-detalle').value }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.ok) { $('u-error').textContent = d.error || d.detail || 'No se pudo registrar'; $('u-error').hidden = false; return; }
+  $('d-usar').close(); ver();
+});
+async function anular(id) {
+  if (!confirm('¿Anular este uso? La unidad vuelve a quedar disponible.')) return;
+  const r = await fetch(`${P}/api/usos/${id}/anular`, { method: 'POST', credentials: 'same-origin' });
+  const d = await r.json().catch(() => ({})); if (!r.ok || !d.ok) alert(d.error || 'No se pudo anular'); ver();
+}
+document.body.addEventListener('click', async e => {
+  const u = e.target.closest('[data-usar]'); if (u) return abrirUso(u.dataset.usar);
+  const a = e.target.closest('[data-anular]'); if (a) return anular(a.dataset.anular);
+  const b = e.target.closest('[data-copiar]'); if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = 'Copiado ✔'; } catch { prompt('Copiá el link:', b.dataset.copiar); }
+});
+
+document.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => rango(b.dataset.r)));
+$('btn-ver').addEventListener('click', ver); $('btn-csv').addEventListener('click', csv);
+$('btn-csv-usos').addEventListener('click', () => { location.href = `${P}/historial/usos.csv?desde=${$('desde').value}&hasta=${$('hasta').value}`; }); $('f-tte').addEventListener('change', pintar);
+$('f-est').addEventListener('change', pintarUnidades); $('f-q').addEventListener('input', pintarUnidades);
+if ($('alta')) {
+  $('alta').addEventListener('submit', async e => { e.preventDefault();
+    const r = await fetch(`${P}/api/transporte`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre: $('a-tte').value.trim(), cuota_dia: $('a-cuota').value, telefono: $('a-tel').value.trim(),
+                             nro_proveedor: (MAESTRO.find(m => m.nombre === $('a-tte').value.trim()) || {}).nro_proveedor }) });
+    const d = await r.json().catch(() => ({})); if (!d.ok) { alert(d.error || 'No se pudo guardar'); return; }
+    e.target.reset(); ver(); });
+}
+const MAESTRO = {{ maestro | tojson }};
+if ($('lista-ttes')) $('lista-ttes').innerHTML = MAESTRO.map(m => `<option value="${esc(m.nombre)}">prov. ${esc(m.nro_proveedor)} · ${m.unidades} unidades</option>`).join('');
+const h = fechaAR(); $('desde').value = h; $('hasta').value = h; ver();
+setInterval(() => { if ($('hasta').value === fechaAR() && !$('d-usar').open) ver(); }, 60000);
+</script>
+{% endblock %}

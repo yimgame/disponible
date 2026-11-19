@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block titulo %}Importar · Disponible{% endblock %}
+{% block contenido %}
+<header><h1>Importar</h1>
+  <p class="sub">Subí los exportes tal como salen. Se leen en tu navegador y al panel llegan solo las columnas que usa el disponible.
+    Primero <b>Revisar</b> (no guarda nada) y después <b>Importar</b>.</p></header>
+
+<section class="card imp" data-tipo="unidades">
+  <h2>1 · Maestro de unidades (exporte de equipos)</h2>
+  <p class="suave">Patente («Inicial de equipo»), tipo de equipo (REF = refrigerado), PALLET_CAP, KG_CAP, Ejes, <b>Bloqueado</b>, <b>Documento Vencido</b>,
+    <b>Fecha Expiración</b>, SATELITAL, Dedicado, ID Transportista (nº de proveedor) y Transportista. Reemplaza los datos de cada patente;
+    es el <b>volcado de bloqueados</b> de unidades: las bloqueadas se le avisan al transporte al cargarlas y quedan marcadas en el disponible.</p>
+  <div class="filtros"><label>Archivo (.xlsx, .csv) <input type="file" accept=".xlsx,.xls,.csv"></label>
+    <button type="button" class="revisar">🔍 Revisar</button><button type="button" class="pri importar" disabled>⬆ Importar</button></div>
+  <div class="res"></div>
+</section>
+
+<section class="card imp" data-tipo="gcg">
+  <h2>2 · GCG (ExportaciónExcel)</h2>
+  <p class="suave">Trabajadores (por DNI) y vehículos (por dominio): estado (habilitado / inhabilitado / bloqueado), contratista y el vencimiento de cada documento.
+    Sirve para la <b>consulta de documentos</b> y para avisar al cargar: chofer o unidad no habilitados = bloqueado; documentos vencidos = aviso.</p>
+  <div class="filtros"><label>Archivo (.xlsx) <input type="file" accept=".xlsx,.xls,.csv"></label>
+    <button type="button" class="revisar">🔍 Revisar</button><button type="button" class="pri importar" disabled>⬆ Importar</button></div>
+  <div class="res"></div>
+</section>
+
+<section class="card imp" data-tipo="bloqueados">
+  <h2>3 · Lista de bloqueados</h2>
+  <p class="suave">Cualquier planilla con una columna de <b>patente/dominio</b> y/o <b>DNI</b>, y opcionalmente <b>motivo</b>. La lista nueva <b>reemplaza</b> a la anterior
+    que se volcó (los bloqueos manuales cargados en Consulta no se tocan).</p>
+  <div class="filtros"><label>Archivo (.xlsx, .csv) <input type="file" accept=".xlsx,.xls,.csv"></label>
+    <label class="switch"><input type="checkbox" class="reemplazar" checked> Reemplazar la lista anterior</label>
+    <button type="button" class="revisar">🔍 Revisar</button><button type="button" class="pri importar" disabled>⬆ Importar</button></div>
+  <div class="res"></div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const P = "{{ P }}";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const norm = (t) => String(t ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// campo: [títulos posibles (normalizados; "x*" = empieza con x)]
+const DEF = {
+  unidades: { clave: ["inicialdeequipo", "iddeequipo", "patente", "dominio"], campos: {
+    patente: ["inicialdeequipo", "patente", "dominio", "iddeequipo"], tipo_equipo: ["iddetipodeequipo", "tipodeequipo", "tipo"],
+    pallets: ["palletcap", "pallets", "capacidadpallets"], kg: ["kgcap"], ejes: ["ejes"], bloqueado: ["bloqueado"],
+    doc_vencido: ["documentovencido"], expiracion: ["fechaexpiracion"], satelital: ["satelital"], dedicado: ["dedicado"],
+    nro_proveedor: ["idtransportista", "nroproveedor", "nrodeproveedor", "proveedor"], transportista: ["transportista", "razonsocial"] } },
+  gcg: { clave: ["nombredominio", "cuitcuil"], campos: {
+    tipo: ["tipo"], id: ["id"], nombre: ["nombredominio"], cuil: ["cuitcuil"], dni: ["dni"], estado: ["estado"], vencimiento: ["vencimiento"],
+    contratista: ["contratista"], subcontratista: ["subcontratista"] }, documentosDesde: "condiciontrabajador" },
+  bloqueados: { clave: [], campos: { patente: ["patente", "dominio", "unidad", "inicialdeequipo"], dni: ["dni", "documento", "nrodocumento", "cuil"],
+    motivo: ["motivo", "observacion", "observaciones", "comentario", "detalle", "causa"] } },
+};
+const GCG_FIJAS = ["tipo", "id", "nombredominio", "cuitcuil", "dni", "genero", "pais", "cliente", "locaciones", "tipodecontratista", "estado", "vencimiento",
+  "responsable", "situacion", "contratista", "subcontratista", "matrizdedocumentos", "nivelderiesgo", "ordenesdecompra", "condiciontrabajador"];
+const coincide = (t, ns) => ns.some((n) => n.endsWith("*") ? t.startsWith(n.slice(0, -1)) : t === n);
+
+async function leer(tipo, archivo) {
+  const def = DEF[tipo];
+  const wb = XLSX.read(await archivo.arrayBuffer(), { cellDates: false, dense: true });
+  for (const hoja of wb.SheetNames) {
+    const filas = XLSX.utils.sheet_to_json(wb.Sheets[hoja], { header: 1, raw: false, blankrows: false, defval: "" });
+    const iTit = filas.findIndex((r) => {
+      const t = r.map(norm);
+      if (tipo === "bloqueados") return t.some((x) => coincide(x, def.campos.patente) || coincide(x, def.campos.dni));
+      return tipo === "gcg" ? def.clave.every((k) => t.includes(k)) : def.clave.some((k) => t.includes(k));
+    });
+    if (iTit < 0) continue;
+    const tit = filas[iTit].map(norm), idx = {};
+    for (const [campo, ns] of Object.entries(def.campos)) { for (const n of ns) { const i = tit.findIndex((t) => coincide(t, [n])); if (i >= 0) { idx[campo] = i; break; } } }
+    const docs = tipo === "gcg" ? tit.map((t, i) => (t && !GCG_FIJAS.includes(t) ? i : -1)).filter((i) => i >= 0) : [];
+    const datos = filas.slice(iTit + 1).map((r) => {
+      const o = Object.fromEntries(Object.entries(idx).map(([k, i]) => [k, r[i] ?? ""]));
+      if (docs.length) o.documentos = Object.fromEntries(docs.map((i) => [String(filas[iTit][i]).trim(), r[i] ?? ""]));
+      return o;
+    });
+    const usadas = Object.entries(idx).map(([k, i]) => `${k} ← «${filas[iTit][i]}»`).join(", ") + (docs.length ? ` · ${docs.length} columnas de documentos` : "");
+    return { datos, info: `${archivo.name} · hoja «${hoja}» · ${datos.length} filas`, usadas };
+  }
+  throw new Error(`${archivo.name}: no encuentro los títulos esperados. ¿Es el archivo correcto?`);
+}
+const TXT = {
+  unidades: (d) => `<b>${d.leidas}</b> unidades (${d.nuevas} nuevas, ${d.actualizadas} actualizadas) · refri ${d.refri} · seco ${d.seco} · <b>${d.bloqueadas}</b> bloqueadas` + (d.invalidas ? ` · ${d.invalidas} patentes inválidas` : ""),
+  gcg: (d) => `<b>${d.trabajadores}</b> trabajadores · <b>${d.vehiculos}</b> vehículos · ${d.no_habilitados} no habilitados · ${d.documentos} documentos con fecha` + (d.invalidas ? ` · ${d.invalidas} sin DNI/dominio` : ""),
+  bloqueados: (d) => `<b>${d.unidades}</b> unidades y <b>${d.choferes}</b> choferes bloqueados` + (d.desactivados ? ` · reemplaza ${d.desactivados} de la lista anterior` : "") + (d.invalidas ? ` · ${d.invalidas} filas sin patente ni DNI` : ""),
+};
+document.querySelectorAll(".imp").forEach((sec) => {
+  const tipo = sec.dataset.tipo, $ = (s) => sec.querySelector(s);
+  let leido = null;
+  $("input[type=file]").onchange = () => { leido = null; $(".importar").disabled = true; $(".res").innerHTML = ""; };
+  async function correr(simular) {
+    const f = $("input[type=file]").files[0];
+    if (!f) { $(".res").innerHTML = '<p class="error">Elegí el archivo.</p>'; return; }
+    $(".res").innerHTML = '<p class="vacio">Procesando…</p>'; $(".revisar").disabled = $(".importar").disabled = true;
+    try {
+      leido = leido || await leer(tipo, f);
+      const r = await fetch(`${P}/api/importar/${tipo}`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filas: leido.datos, simular, reemplazar: $(".reemplazar") ? $(".reemplazar").checked : true }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || d.detail || "error " + r.status);
+      $(".res").innerHTML = `<p class="aviso">${simular ? "Revisión (todavía no se guardó nada)" : "✔ Importado"}: ${TXT[tipo](d)}</p>` +
+        `<p class="suave">${esc(leido.info)}<br>Columnas: ${esc(leido.usadas)}</p>`;
+      $(".importar").disabled = !simular;
+    } catch (e) { $(".res").innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+    $(".revisar").disabled = false;
+  }
+  $(".revisar").onclick = () => correr(true);
+  $(".importar").onclick = () => { if (confirm("¿Importar a la base?")) correr(false); };
+});
+</script>
+{% endblock %}

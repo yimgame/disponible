@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block titulo %}Integraciones · Disponible{% endblock %}
+{% block contenido %}
+<header><h1>Integraciones (n8n / agente de IA)</h1>
+  <p class="sub">El disponible avisa a n8n de cada evento (webhook) y n8n puede consultar y cargar datos con la API. Con las dos cosas se engancha un agente de IA.</p></header>
+
+<section class="card">
+  <h2>1 · Webhook saliente (Disponible → n8n)</h2>
+  {% if webhook %}
+    <p class="aviso">✔ Activo hacia: {% for x in urls %}<code>{{ x }}</code>{{ ', ' if not loop.last }}{% endfor %}
+      · firma {{ 'activada' if firma else 'desactivada (definí WEBHOOK_SECRET)' }}{% if eventos %} · solo: {{ eventos|join(', ') }}{% endif %}</p>
+    <form method="post" action="{{ P }}/integraciones/prueba" style="margin-top:.6rem"><button class="chico">Mandar un evento de prueba</button></form>
+  {% else %}
+    <p class="alerta">Desactivado. Para activarlo, en el <code>.env</code> del servidor: <code>WEBHOOK_URL=https://tu-n8n/webhook/disponible</code>
+      (y opcional <code>WEBHOOK_SECRET=...</code>), y reiniciá el panel.</p>
+  {% endif %}
+  <p>Cada evento llega por <b>POST</b> con este formato:</p>
+  <pre>{
+  "evento": "movimiento" | "alerta_bloqueo" | "uso" | "uso_anulado" | "prueba",
+  "enviado": "2026-11-19T10:15:00-03:00",
+  "datos": { ... }   // el movimiento (con "alertas"), el uso, etc.
+}</pre>
+  <p class="suave">Headers: <code>X-Disponible-Evento</code> y, si hay secreto, <code>X-Disponible-Firma: sha256=&lt;HMAC del cuerpo&gt;</code> para validar que viene del disponible.
+    Ejemplo de uso: un flujo de n8n con un <i>Webhook</i> → <i>AI Agent</i> que, ante una <code>alerta_bloqueo</code>, le escribe al transporte por WhatsApp.</p>
+  {% if ultimos %}
+  <h3>Últimos envíos</h3>
+  <div class="tabla"><table><thead><tr><th>Cuándo</th><th>Evento</th><th>Destino</th><th>Resultado</th></tr></thead><tbody>
+    {% for x in ultimos %}<tr><td class="nw">{{ x.cuando[:19].replace('T', ' ') }}</td><td>{{ x.evento }}</td><td>{{ x.url }}</td>
+      <td>{% if 'HTTP 2' in x.resultado %}<span class="chip ok">{{ x.resultado }}</span>{% else %}<span class="chip bad">{{ x.resultado }}</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>2 · API para agentes (n8n → Disponible)</h2>
+  {% if api %}<p class="aviso">✔ Activa. Autenticación: header <code>Authorization: Bearer &lt;AGENTE_API_KEY&gt;</code> (la llave está en el <code>.env</code> del servidor).</p>
+  {% else %}<p class="alerta">Desactivada. Definí <code>AGENTE_API_KEY</code> en el <code>.env</code> del servidor (una clave larga al azar) y reiniciá el panel.</p>{% endif %}
+  <p>Base: <code>{{ base }}/api/v1</code>. Cada endpoint sirve como <i>HTTP Request Tool</i> de un <i>AI Agent</i> en n8n.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Método y ruta</th><th>Para qué</th></tr></thead>
+    <tbody>
+      <tr><td class="pat">GET /api/v1/estado?fecha=AAAA-MM-DD&amp;transporte_id=</td><td>Disponible del día: unidades (disponibles / usadas, ETA, chofer, bloqueos), totales y cuota por transporte.</td></tr>
+      <tr><td class="pat">GET /api/v1/transportes</td><td>Transportes (id, nombre, nº de proveedor, cuota, celular).</td></tr>
+      <tr><td class="pat">GET /api/v1/unidad/{patente}</td><td>Maestro de la unidad, GCG, bloqueos y alertas.</td></tr>
+      <tr><td class="pat">GET /api/v1/chofer/{dni}</td><td>GCG del chofer, bloqueos y alertas.</td></tr>
+      <tr><td class="pat">POST /api/v1/movimientos</td><td>Cargar o sacar una unidad: <code>{transporte_id, patente, accion: "agrega"|"quita", tipo: "refri"|"seco", pallets, eta, chofer_dni, comentario}</code>.</td></tr>
+      <tr><td class="pat">POST /api/v1/usos</td><td>Usar una unidad: <code>{patente, destino, viaje, planta, detalle, fecha}</code>.</td></tr>
+      <tr><td class="pat">GET /api/v1/usos?desde=&amp;hasta=&amp;transporte_id=</td><td>Usos de un rango (dónde se usó cada unidad).</td></tr>
+    </tbody></table></div>
+  <p class="suave">Ejemplo: <code>curl -H "Authorization: Bearer $AGENTE_API_KEY" {{ base }}/api/v1/estado</code></p>
+</section>
+{% endblock %}

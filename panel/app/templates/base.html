@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{% block titulo %}Disponible de unidades{% endblock %}</title>
+<link rel="stylesheet" href="{{ P }}/static/panel.css?v=1">
+</head>
+<body>
+<header class="barra">
+  <a class="marca" href="{{ P }}/">🚛 Disponible <span class="suave">· de unidades</span></a>
+  {% if u %}
+  <nav>
+    <a href="{{ P }}/">Panel</a>
+    <a href="{{ P }}/transportes">Transportes</a>
+    <a href="{{ P }}/consulta">Consulta</a>
+    {% if 'gestion' in u.puede %}<a href="{{ P }}/importar">Importar</a>{% endif %}
+    {% if 'usuarios' in u.puede %}<a href="{{ P }}/usuarios">Usuarios</a><a href="{{ P }}/integraciones">Integraciones</a>{% endif %}
+    <a href="{{ P }}/ayuda" title="Cómo hacer cada cosa">❓ Ayuda</a>
+    <a href="{{ P }}/cuenta">{{ u.nombre or u.usuario }}</a>
+    <form method="post" action="{{ P }}/salir"><button class="link">Salir</button></form>
+  </nav>
+  {% endif %}
+</header>
+<main>{% block contenido %}{% endblock %}</main>
+</body>
+</html>

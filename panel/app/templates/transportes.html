@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block titulo %}Transportes · Disponible{% endblock %}
+{% block contenido %}
+{% set gestion = 'gestion' in u.puede %}
+<header><h1>Transportes</h1><p class="sub">Cada transporte carga su disponible con su link (sin usuario ni clave).</p></header>
+{% if msg %}<p class="aviso">✔ {{ msg }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<section class="card">
+  <div class="tabla"><table>
+    <thead><tr><th>Transporte</th><th>Nº proveedor</th><th class="n">Cuota/día</th><th>Celular</th><th>Estado</th><th>Link</th>{% if gestion %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for t in transportes %}
+      <tr class="{{ '' if t.activo else 'apagado' }}">
+        {% if gestion %}
+        <td><input form="t{{ t.id }}" name="nombre" value="{{ t.nombre }}" maxlength="80"></td>
+        <td><input form="t{{ t.id }}" name="nro_proveedor" value="{{ t.nro_proveedor or '' }}" size="8"></td>
+        <td><input form="t{{ t.id }}" name="cuota_dia" type="number" min="0" max="500" value="{{ t.cuota_dia }}" style="width:5rem"></td>
+        <td><input form="t{{ t.id }}" name="telefono" value="{{ t.telefono or '' }}" size="13"></td>
+        <td><select form="t{{ t.id }}" name="activo"><option value="1" {{ 'selected' if t.activo }}>Activo</option><option value="0" {{ 'selected' if not t.activo }}>De baja</option></select></td>
+        {% else %}
+        <td>{{ t.nombre }}</td><td>{{ t.nro_proveedor or '' }}</td><td class="n">{{ t.cuota_dia }}</td><td>{{ t.telefono or '' }}</td><td>{{ 'Activo' if t.activo else 'De baja' }}</td>
+        {% endif %}
+        <td><div class="acc"><button type="button" data-copiar="/cargar?t={{ t.token }}">Copiar link</button>
+          <a href="/cargar?t={{ t.token }}" target="_blank" rel="noopener">Abrir ↗</a></div></td>
+        {% if gestion %}<td><div class="acc"><button form="t{{ t.id }}" class="pri">Guardar</button>
+          <button form="tk{{ t.id }}" onclick="return confirm('¿Generar un link nuevo para {{ t.nombre }}? El link anterior deja de funcionar.')">🔁 Link nuevo</button></div></td>{% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="vacio">Todavía no hay transportes. Cargalos desde el panel (abajo de todo) o acá.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% for t in transportes %}<form method="post" id="t{{ t.id }}"><input type="hidden" name="id" value="{{ t.id }}"></form>
+  <form method="post" id="tk{{ t.id }}"><input type="hidden" name="id" value="{{ t.id }}"><input type="hidden" name="accion" value="token"></form>{% endfor %}
+</section>
+{% if gestion %}
+<section class="card">
+  <h2>Agregar transporte</h2>
+  <form method="post" class="filtros">
+    <label>Nombre <input name="nombre" required list="maestro" maxlength="80" autocomplete="off" id="n-nombre"></label>
+    <datalist id="maestro">{% for m in maestro %}<option value="{{ m.nombre }}">prov. {{ m.nro_proveedor }} · {{ m.unidades }} unidades</option>{% endfor %}</datalist>
+    <label>Nº proveedor <input name="nro_proveedor" id="n-prov" size="10"></label>
+    <label>Cuota diaria <input name="cuota_dia" type="number" min="0" max="500" value="0" style="width:6rem"></label>
+    <label>Celular (WhatsApp) <input name="telefono" placeholder="5491122334455"></label>
+    <button class="pri">Agregar</button>
+  </form>
+  <p class="vacio">El nº de proveedor es el «ID Transportista» del maestro de unidades: con eso el transporte ve sus unidades al cargar. Si lo elegís de la lista se completa solo.</p>
+</section>
+{% endif %}
+<script>
+const MAESTRO = {{ maestro | tojson }};
+const nn = document.getElementById("n-nombre");
+if (nn) nn.addEventListener("change", () => { const m = MAESTRO.find((x) => x.nombre === nn.value); if (m) document.getElementById("n-prov").value = m.nro_proveedor || ""; });
+document.body.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-copiar]"); if (!b) return;
+  const link = location.origin + b.dataset.copiar;
+  try { await navigator.clipboard.writeText(link); b.textContent = "Copiado ✔"; } catch { prompt("Copiá el link:", link); }
+});
+</script>
+{% endblock %}
