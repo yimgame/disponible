@@ -139,22 +139,26 @@ def info_chofer(dni):
     return {"dni": d, "bloqueos": b, "gcg": dict(g) if g else None}
 
 
-def alertas(patente, dni=None, en_vivo=True, fresco=False, forzar_vivo=False):
+def alertas(patentes, dni=None, en_vivo=True, fresco=False, forzar_vivo=False):
     """[{nivel: bloqueo|aviso, texto}] para mostrarle al transporte y guardar en el disponible.
-    Semáforo GCG de unidad y chofer: rojo bloquea, amarillo avisa (ver semaforo())."""
+    patentes: una patente o la lista del equipo (tractor, semi, acoplado…). Semáforo GCG: rojo bloquea, amarillo avisa."""
+    if isinstance(patentes, str) or patentes is None:
+        patentes = [patentes] if patentes else []
+    varias = len(patentes) > 1
     hoy = db.hoy()
     out = []
-    iu = info_unidad(patente) if patente else {"unidad": None, "bloqueos": [], "gcg": None}
-    u = iu["unidad"]
-    if u and u["bloqueado"]:
-        extra = f" — documento vencido: {u['doc_vencido']}" if u.get("doc_vencido") else ""
-        out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada en el maestro de unidades{extra}"})
-    if u and u.get("fecha_expiracion") and u["fecha_expiracion"] < hoy:
-        out.append({"nivel": "aviso", "texto": f"Unidad con fecha de expiración vencida ({u['fecha_expiracion']})"})
-    for b in iu["bloqueos"]:
-        out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
-    if patente:
-        out += _alertas_semaforo("unidad", patente, iu["gcg"], en_vivo, fresco, forzar_vivo)
+    for patente in patentes:
+        cual = f" ({norm_patente(patente)})" if varias else ""
+        iu = info_unidad(patente)
+        u = iu["unidad"]
+        if u and u["bloqueado"]:
+            extra = f" — documento vencido: {u['doc_vencido']}" if u.get("doc_vencido") else ""
+            out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada en el maestro de unidades{cual}{extra}"})
+        if u and u.get("fecha_expiracion") and u["fecha_expiracion"] < hoy:
+            out.append({"nivel": "aviso", "texto": f"Unidad con fecha de expiración vencida ({u['fecha_expiracion']}){cual}"})
+        for b in iu["bloqueos"]:
+            out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada: {b['motivo'] or 'sin motivo'} ({b['origen']}){cual}"})
+        out += _alertas_semaforo("unidad", patente, iu["gcg"], en_vivo, fresco, forzar_vivo, cual)
     if dni:
         ic = info_chofer(dni)
         for b in ic["bloqueos"]:
@@ -163,21 +167,21 @@ def alertas(patente, dni=None, en_vivo=True, fresco=False, forzar_vivo=False):
     return out
 
 
-def _alertas_semaforo(tipo, clave, g, en_vivo, fresco=False, forzar_vivo=False):
+def _alertas_semaforo(tipo, clave, g, en_vivo, fresco=False, forzar_vivo=False, cual=""):
     quien = "Chofer" if tipo == "chofer" else "Unidad"
     sem = semaforo(tipo, clave, g, en_vivo, fresco, forzar_vivo)
     out = []
     if sem["color"] == "rojo":
-        out.append({"nivel": "bloqueo", "texto": f"{quien} en ROJO: {sem['texto']}"})
+        out.append({"nivel": "bloqueo", "texto": f"{quien} en ROJO{cual}: {sem['texto']}"})
     elif sem["color"] == "amarillo":
-        out.append({"nivel": "aviso", "texto": f"{quien} en AMARILLO: {sem['texto']}"})
+        out.append({"nivel": "aviso", "texto": f"{quien} en AMARILLO{cual}: {sem['texto']}"})
     elif sem["color"] == "sin_dato" and tipo == "chofer":
         out.append({"nivel": "aviso", "texto": "El chofer no figura en el último exporte de GCG"})
     if sem.get("proximos"):
-        out.append({"nivel": "aviso", "texto": ("Críticos por vencer: " if tipo == "chofer" else "Críticos de la unidad por vencer: ")
+        out.append({"nivel": "aviso", "texto": ("Críticos por vencer: " if tipo == "chofer" else f"Críticos de la unidad por vencer{cual}: ")
                     + ", ".join(sem["proximos"])})
     if sem.get("otros_vencidos"):
-        out.append({"nivel": "aviso", "texto": f"GCG {tipo}, otros documentos vencidos: " + ", ".join(sem["otros_vencidos"])})
+        out.append({"nivel": "aviso", "texto": f"GCG {tipo}, otros documentos vencidos{cual}: " + ", ".join(sem["otros_vencidos"])})
     return out
 
 
@@ -328,12 +332,74 @@ def _eta(v):
     return d.replace(tzinfo=None).isoformat(timespec="minutes")
 
 
+CONFIGURACIONES = {   # cómo viene armado el equipo: nombre y rol de cada patente (Unidad 1, 2, 3)
+    "tractor_semi": ("Tractor + Semi", ["Tractor", "Semi"]),
+    "chasis_acoplado": ("Chasis + Acoplado", ["Chasis", "Acoplado"]),
+    "tractor_bitren": ("Tractor + Bitren + Semi", ["Tractor", "Bitren", "Semi"]),
+    "chasis_solo": ("Chasis / balancín solo", ["Chasis / balancín"]),
+}
+PALLETS_CHASIS_SOLO = (8, 16)
+
+
+def clase_equipo(patente):
+    """Clase según el tipo de equipo del maestro (CHASIS_…, BALANCIN_…, BITREN_…); None si no está o no se distingue."""
+    u = info_unidad(patente)["unidad"]
+    t = ((u or {}).get("tipo_equipo") or "").upper()
+    if t.startswith(("CHASIS", "BALANCIN")):
+        return "chasis"
+    if t.startswith("BITREN"):
+        return "bitren"
+    if t.startswith(("CAMION_", "PORTA_CONTENEDOR")):
+        return "semi"                    # unidad de carga enganchada a un tractor (semi / acoplado)
+    return None
+
+
+def validar_equipo(config, patentes, roles):
+    """No se puede armar: tractor solo, semi solo, chasis + semi, tractor + acoplado (las configuraciones ya lo impiden)
+    ni poner en una posición una patente que el maestro dice que es otra cosa."""
+    for p, rol in zip(patentes, roles):
+        cl = clase_equipo(p)
+        es_chasis = rol.startswith("Chasis")
+        if es_chasis and cl and cl != "chasis":
+            raise Error(f"{p} figura como {cl} en el maestro de unidades: no puede ir como {rol.lower()}.")
+        if not es_chasis and cl == "chasis":
+            raise Error(f"{p} es un chasis / balancín en el maestro: elegí «Chasis + Acoplado» o «Chasis / balancín solo».")
+        if rol == "Tractor" and cl == "semi":
+            raise Error(f"{p} figura como semi / unidad de carga en el maestro: no puede ir como tractor (va en la unidad 2).")
+        if cl == "bitren" and config != "tractor_bitren":
+            raise Error(f"{p} figura como bitren en el maestro: elegí «Tractor + Bitren + Semi».")
+
+
+def equipo(m):
+    """[(patente, rol)] de un movimiento / fila."""
+    roles = CONFIGURACIONES.get(m.get("configuracion") or "", (None, []))[1]
+    pats = [p for p in (m.get("patente"), m.get("patente2"), m.get("patente3")) if p]
+    return [(p, roles[i] if i < len(roles) else f"Unidad {i + 1}") for i, p in enumerate(pats)]
+
+
 def registrar_movimiento(t, b, informante="link"):
     patente = norm_patente(b.get("patente"))
     if not patente_valida(patente):
-        raise Error("Revisá la patente (ej. AB123CD o ABC123).")
+        raise Error("Revisá la patente de la unidad 1 (ej. AB123CD o ABC123).")
     accion = "quita" if b.get("accion") == "quita" else "agrega"
-    u = info_unidad(patente)["unidad"]
+    extras = [norm_patente(b.get(k)) for k in ("patente2", "patente3")]
+    config = b.get("configuracion")
+    if config not in CONFIGURACIONES:            # sin configuración: se deduce de cuántas patentes vinieron
+        n = 1 + sum(1 for x in extras if x)
+        config = {1: "chasis_solo", 2: "tractor_semi", 3: "tractor_bitren"}[n]
+    roles = CONFIGURACIONES[config][1]
+    patentes = [patente] + [x for x in extras][:len(roles) - 1]
+    if accion == "agrega":
+        for i, (p, rol) in enumerate(zip(patentes, roles)):
+            if not patente_valida(p):
+                raise Error(f"Falta o está mal la patente de la unidad {i + 1} ({rol.lower()}).")
+        if len(set(patentes)) < len(patentes):
+            raise Error("Hay patentes repetidas en el equipo.")
+        validar_equipo(config, patentes, roles)
+    else:
+        patentes, config = [patente], None
+    # tipo y pallets: del maestro de la unidad que carga (la última del equipo: semi, acoplado o el chasis)
+    u = info_unidad(patentes[-1])["unidad"] or info_unidad(patente)["unidad"]
     tipo = b.get("tipo") if b.get("tipo") in ("refri", "seco") else (u["tipo"] if u else "")
     try:
         pallets = int(float(b.get("pallets") or (u["pallets"] if u and u["pallets"] else 0)))
@@ -347,17 +413,21 @@ def registrar_movimiento(t, b, informante="link"):
             raise Error("Elegí Refrigerado o Seco.")
         if not 1 <= pallets <= 40:
             raise Error("Pallets entre 1 y 40.")
+        if config == "chasis_solo" and not PALLETS_CHASIS_SOLO[0] <= pallets <= PALLETS_CHASIS_SOLO[1]:
+            raise Error(f"Un chasis / balancín solo lleva de {PALLETS_CHASIS_SOLO[0]} a {PALLETS_CHASIS_SOLO[1]} pallets.")
     eta = _eta(b.get("eta")) if accion == "agrega" else ""
-    al = alertas(patente, dni) if accion == "agrega" else []
+    al = alertas(patentes, dni) if accion == "agrega" else []
     bloq = [a["texto"] for a in al if a["nivel"] == "bloqueo"]
     ahora = db.ahora()
     gch = info_chofer(dni)["gcg"] if dni else None
     chofer_nombre = (gch or {}).get("nombre")
-    det = detalle_gcg(patente, dni, gch) if accion == "agrega" else {}
+    det = detalle_gcg(list(zip(patentes, roles)), dni, gch) if accion == "agrega" else {}
     chofer_semaforo = (det.get("chofer") or {}).get("color")
     unidad_semaforo = (det.get("unidad") or {}).get("color")
     fila = {"creado": ahora.isoformat(timespec="microseconds"), "fecha": ahora.date().isoformat(),
             "hora": ahora.strftime("%H:%M"), "transporte_id": t["id"], "transporte": t["nombre"], "patente": patente,
+            "patente2": patentes[1] if len(patentes) > 1 else None, "patente3": patentes[2] if len(patentes) > 2 else None,
+            "configuracion": config,
             "tipo": tipo, "pallets": pallets or None, "accion": accion, "eta": eta, "chofer_dni": dni,
             "chofer_nombre": chofer_nombre, "chofer_semaforo": chofer_semaforo, "unidad_semaforo": unidad_semaforo,
             "gcg_detalle": json.dumps(det, ensure_ascii=False) if det else None, "gcg_consultado": db.ahora_iso() if det else None, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
@@ -366,22 +436,47 @@ def registrar_movimiento(t, b, informante="link"):
     with closing(db.con()) as c, c:
         fila["id"] = c.execute(f"INSERT INTO movimientos ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
                                list(fila.values())).lastrowid
+        if det:
+            c.execute("INSERT INTO gcg_historial (movimiento_id, consultado, por, motivo, detalle) VALUES (?,?,?,?,?)",
+                      (fila["id"], fila["gcg_consultado"], informante, "carga", fila["gcg_detalle"]))
     webhooks.enviar("movimiento", {**fila, "alertas": al})
     if bloq:
-        webhooks.enviar("alerta_bloqueo", {"transporte": t["nombre"], "patente": patente, "chofer_dni": dni,
+        webhooks.enviar("alerta_bloqueo", {"transporte": t["nombre"], "patente": patente, "patentes": patentes, "chofer_dni": dni,
                                            "motivos": bloq, "movimiento_id": fila["id"]})
     return fila, al
 
 
-def detalle_gcg(patente, dni=None, gch=None, fresco=False, forzar_vivo=False):
-    """Semáforo + pendientes de la unidad y del chofer (lo que se le muestra al proveedor y va a la columna GCG)."""
-    out = {}
-    for tipo, clave, g in (("unidad", patente, None), ("chofer", dni, gch)):
-        if not clave:
-            continue
-        s = semaforo(tipo, clave, g, True, fresco, forzar_vivo)
-        out[tipo] = {"color": s["color"], "texto": s["texto"], "fuente": s.get("fuente"), "pendientes": s.get("pendientes", [])}
+ORDEN_COLOR = {"rojo": 3, "amarillo": 2, "sin_dato": 1, "verde": 0}
+
+
+def detalle_gcg(equipo_, dni=None, gch=None, fresco=False, forzar_vivo=False):
+    """Semáforo + pendientes de cada patente del equipo y del chofer (lo que ve el proveedor y va a la columna GCG).
+    equipo_: [(patente, rol)] o una patente sola. "unidad" resume el equipo (el peor color y todos los pendientes)."""
+    if isinstance(equipo_, str):
+        equipo_ = [(equipo_, None)]
+    out, unidades = {}, []
+    for patente, rol in equipo_:
+        s = semaforo("unidad", patente, None, True, fresco, forzar_vivo)
+        unidades.append({"patente": norm_patente(patente), "rol": rol, "color": s["color"], "texto": s["texto"],
+                         "fuente": s.get("fuente"), "pendientes": s.get("pendientes", [])})
+    if unidades:
+        peor = max(unidades, key=lambda x: ORDEN_COLOR.get(x["color"], 0))
+        varias = len(unidades) > 1
+        out["unidades"] = unidades
+        out["unidad"] = {"color": peor["color"], "texto": peor["texto"], "fuente": peor["fuente"],
+                         "pendientes": [{**p, "documento": (f"{x['patente']} · " if varias else "") + p["documento"]}
+                                        for x in unidades for p in x["pendientes"]]}
+    if dni:
+        s = semaforo("chofer", dni, gch, True, fresco, forzar_vivo)
+        out["chofer"] = {"color": s["color"], "texto": s["texto"], "fuente": s.get("fuente"), "pendientes": s.get("pendientes", [])}
     return out
+
+
+def historial_gcg(mov_id):
+    """Cómo estaban los documentos en cada consulta de esa carga (la de la carga y cada reconsulta)."""
+    with closing(db.con()) as c:
+        return [{**dict(r), "detalle": json.loads(r["detalle"] or "{}")}
+                for r in c.execute("SELECT * FROM gcg_historial WHERE movimiento_id=? ORDER BY consultado", (mov_id,))]
 
 
 def reconsultar_gcg(mov_id, transporte_id=None, por=""):
@@ -393,8 +488,9 @@ def reconsultar_gcg(mov_id, transporte_id=None, por=""):
     m = dict(m)
     if m["accion"] != "agrega":
         raise Error("Solo se reconsultan unidades cargadas.")
-    det = detalle_gcg(m["patente"], m["chofer_dni"], None, fresco=True, forzar_vivo=True)
-    al = alertas(m["patente"], m["chofer_dni"], en_vivo=True, forzar_vivo=True)   # usa la respuesta recién guardada
+    eq = equipo(m)
+    det = detalle_gcg(eq, m["chofer_dni"], None, fresco=True, forzar_vivo=True)
+    al = alertas([p for p, _ in eq], m["chofer_dni"], en_vivo=True, forzar_vivo=True)   # usa la respuesta recién guardada
     bloq = [a["texto"] for a in al if a["nivel"] == "bloqueo"]
     antes = m["bloqueado"]
     with closing(db.con()) as c, c:
@@ -403,7 +499,9 @@ def reconsultar_gcg(mov_id, transporte_id=None, por=""):
                   ((det.get("unidad") or {}).get("color"), (det.get("chofer") or {}).get("color"), json.dumps(det, ensure_ascii=False),
                    db.ahora_iso(), 1 if bloq else 0, " · ".join(bloq)[:500],
                    " · ".join(a["texto"] for a in al if a["nivel"] != "bloqueo")[:800], mov_id))
-    res = {"movimiento_id": mov_id, "patente": m["patente"], "transporte": m["transporte"], "gcg": det,
+        c.execute("INSERT INTO gcg_historial (movimiento_id, consultado, por, motivo, detalle) VALUES (?,?,?,?,?)",
+                  (mov_id, db.ahora_iso(), por, "reconsulta", json.dumps(det, ensure_ascii=False)))
+    res = {"movimiento_id": mov_id, "patente": m["patente"], "patentes": [p for p, _ in eq], "transporte": m["transporte"], "gcg": det,
            "bloqueado": 1 if bloq else 0, "se_desbloqueo": bool(antes and not bloq), "alertas": al, "por": por}
     webhooks.enviar("gcg_reconsulta", res)
     return res
@@ -439,6 +537,8 @@ def estado_dia(fecha=None, transporte_id=None):
                       "chofer_dni": m["chofer_dni"], "chofer_nombre": m["chofer_nombre"],
                       "chofer_semaforo": m.get("chofer_semaforo"), "unidad_semaforo": m.get("unidad_semaforo"),
                       "gcg": json.loads(m["gcg_detalle"]) if m.get("gcg_detalle") else None,
+                      "patente2": m.get("patente2"), "patente3": m.get("patente3"), "configuracion": m.get("configuracion"),
+                      "equipo": [{"patente": p, "rol": r} for p, r in equipo(m)],
                       "gcg_consultado": m.get("gcg_consultado"),
                       "comentario": m["comentario"],
                       "bloqueado": m["bloqueado"], "bloqueo_motivo": m["bloqueo_motivo"], "movimiento_id": m["id"],

@@ -74,7 +74,7 @@
   <section class="card">
     <h2>Movimientos</h2>
     <div class="tabla"><table>
-      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th class="n">Pallets</th><th>Acción</th><th>ETA</th><th>Chofer</th><th>Comentario</th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th class="n">Pallets</th><th>Acción</th><th>ETA</th><th>Chofer</th><th>GCG al cargar</th><th>Comentario</th></tr></thead>
       <tbody id="t-mov"></tbody>
     </table></div>
   </section>
@@ -93,6 +93,15 @@
       Para cambiar la cuota o el celular, cargalo de nuevo con el mismo nombre: el link no cambia. Más opciones en <a href="{{ P }}/transportes">Transportes</a>.</p>
   </section>
   {% endif %}
+
+<dialog id="d-hist">
+  <form method="dialog">
+    <h2 style="margin:0">Historial GCG <span id="h-titulo" class="pat"></span></h2>
+    <p class="suave" style="margin:0">Cómo estaban los documentos en cada consulta: al cargar y en cada «volver a consultar».</p>
+    <div id="h-cuerpo"></div>
+    <div class="rap"><button value="cerrar">Cerrar</button></div>
+  </form>
+</dialog>
 
 <dialog id="d-usar">
   <form method="dialog" id="f-usar">
@@ -116,16 +125,27 @@ const P = "{{ P }}", GESTION = {{ 'true' if gestion else 'false' }};
 const SEMA = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };   // semáforo documental (GCG)
 const ESTG = { vencido: 'vencido', falta: 'falta', 'por vencer': 'por vencer' };
 const conPendientes = (g) => g && ['unidad', 'chofer'].some((k) => g[k] && (g[k].pendientes || []).length);
-// Columna GCG: semáforo y documentos para actualizar de la unidad y del chofer
+// Columna GCG: semáforo y documentos para actualizar de cada patente del equipo y del chofer
+function gcgPartes(g) {
+  if (!g) return [];
+  const us = g.unidades || (g.unidad ? [{ ...g.unidad, patente: 'Unidad', rol: '' }] : []);
+  return [...us.map((u) => ({ titulo: `${u.rol ? u.rol + ' ' : ''}${u.patente}`, ...u })), ...(g.chofer ? [{ titulo: 'Chofer', ...g.chofer }] : [])];
+}
+const COLOR_TXT = { verde: 'verde', amarillo: 'amarillo', rojo: 'ROJO', sin_dato: 'no figura en GCG' };
+const docTxt = (d) => `${d.documento} ${ESTG[d.estado] || d.estado}${d.fecha ? ' ' + dmy(d.fecha) : ''}${d.critico ? ' (bloquea)' : ''}`;
+function gcgTooltip(g) {
+  return gcgPartes(g).map((x) => `${x.titulo}: ${COLOR_TXT[x.color] || x.color}` +
+    ((x.pendientes || []).length ? '\n  · ' + x.pendientes.map(docTxt).join('\n  · ') : '')).join('\n');
+}
 function gcgCelda(f) {
   const g = f.gcg;
   if (!g) return '<span class="vacio">—</span>';
-  const partes = ['unidad', 'chofer'].filter((k) => g[k]).map((k) => {
-    const x = g[k], p = x.pendientes || [];
-    const lista = p.map((d) => `${esc(d.documento)} <b>${ESTG[d.estado] || esc(d.estado)}</b>${d.fecha ? ' ' + dmy(d.fecha).slice(0, 5) : ''}${d.critico ? ' ⛔' : ''}`).join('; ');
-    return `<div><b>${k === 'unidad' ? 'Unidad' : 'Chofer'}</b> ${SEMA[x.color] || '⚪'}${p.length ? ` <span class="suave">· ${lista}</span>` : x.color === 'sin_dato' ? ' <span class="suave">sin dato</span>' : ' <span class="suave">al día</span>'}</div>`;
+  const partes = gcgPartes(g).map((x) => {
+    const p = x.pendientes || [];
+    return `<div><b>${esc(x.titulo)}</b> ${SEMA[x.color] || '⚪'} <span class="suave">${p.length ? p.length + ' doc. ' + (p.some((d) => d.critico) ? '⛔' : '') : x.color === 'sin_dato' ? 'no figura' : 'al día'}</span></div>`;
   });
-  return `<div class="gcg-celda">${partes.join('')}${f.gcg_consultado ? `<div class="suave">consultado ${esc(f.gcg_consultado.slice(11, 16))}</div>` : ''}</div>`;
+  return `<div class="gcg-celda" title="${esc(gcgTooltip(g))}" data-hist="${f.movimiento_id}" role="button" tabindex="0">${partes.join('')}` +
+    `<div class="suave">${f.gcg_consultado ? 'consultado ' + esc(f.gcg_consultado.slice(11, 16)) + ' · ' : ''}<u>historial</u></div></div>`;
 }
 const BASE_CARGA = location.origin + '/cargar';
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -202,9 +222,11 @@ function pintar() {
     <td>${esc(x.detalle)}</td><td>${esc(x.usuario)}</td><td>${x.anulado ? `<span class="chip na">anulado</span>` : (GESTION ? `<div class="acc"><button type="button" data-anular="${x.id}">↩ Anular</button></div>` : '')}</td></tr>`).join('')
     || '<tr><td colspan="11" class="vacio">Todavía no se asignó ninguna unidad en estas fechas.</td></tr>';
   $('t-mov').innerHTML = [...movs].sort((a, b) => String(b.creado).localeCompare(String(a.creado))).map(m => `<tr><td class="nw">${dmy(m.fecha)}</td><td>${esc(m.hora)}</td><td>${esc(m.transporte)}</td>
-    <td class="pat">${esc(m.patente)}${m.bloqueado ? ' <span class="chip bad" title="' + esc(m.bloqueo_motivo) + '">bloq.</span>' : ''}</td><td class="${m.tipo}">${esc(m.tipo)}</td><td class="n">${m.pallets ?? ''}</td>
-    <td class="${m.accion}">${m.accion === 'quita' ? 'Sacó' : 'Puso'}</td><td class="nw">${fh(m.eta)}</td><td>${esc(m.chofer_nombre || m.chofer_dni)}</td><td>${esc(m.comentario)}</td></tr>`).join('')
-    || '<tr><td colspan="10" class="vacio">Sin movimientos en estas fechas.</td></tr>';
+    <td class="pat">${[m.patente, m.patente2, m.patente3].filter(Boolean).map(esc).join(' + ')}${m.bloqueado ? ' <span class="chip bad" title="' + esc(m.bloqueo_motivo) + '">bloq.</span>' : ''}</td><td class="${m.tipo}">${esc(m.tipo)}</td><td class="n">${m.pallets ?? ''}</td>
+    <td class="${m.accion}">${m.accion === 'quita' ? 'Sacó' : 'Puso'}</td><td class="nw">${fh(m.eta)}</td><td>${esc(m.chofer_nombre || m.chofer_dni)}</td>
+    <td>${m.gcg_detalle ? (() => { const g = JSON.parse(m.gcg_detalle); return `<span class="gcg-mini" title="${esc(gcgTooltip(g))}" data-hist="${m.id}" role="button" tabindex="0">${gcgPartes(g).map(x => SEMA[x.color] || '⚪').join(' ')}</span>`; })() : ''}</td>
+    <td>${esc(m.comentario)}</td></tr>`).join('')
+    || '<tr><td colspan="11" class="vacio">Sin movimientos en estas fechas.</td></tr>';
 }
 
 function pintarUnidades() {
@@ -216,7 +238,7 @@ function pintarUnidades() {
   const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : est === 'gcg' ? conPendientes(f.gcg) : f.estado === est)) &&
     (!q || [f.patente, f.chofer_nombre, f.chofer_dni].join(' ').toLowerCase().includes(q)));
   $('h-uni').textContent = `Unidades del ${dmy($('hasta').value)} — ${filas.length}`;
-  $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${SEMA[f.unidad_semaforo] ? SEMA[f.unidad_semaforo] + ' ' : ''}${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
+  $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat" title="${esc((f.equipo || []).map(e => e.rol + ': ' + e.patente).join('\n'))}">${SEMA[f.unidad_semaforo] ? SEMA[f.unidad_semaforo] + ' ' : ''}${(f.equipo && f.equipo.length ? f.equipo.map(e => esc(e.patente)) : [esc(f.patente)]).join('<br>+ ')}</td><td>${esc(f.transporte)}</td>
     <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
     <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
     <td>${f.chofer_dni ? `${SEMA[f.chofer_semaforo] || '⚪'} ` : ''}${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
@@ -263,7 +285,20 @@ async function anular(id) {
   const r = await fetch(`${P}/api/usos/${id}/anular`, { method: 'POST', credentials: 'same-origin' });
   const d = await r.json().catch(() => ({})); if (!r.ok || !d.ok) alert(d.error || 'No se pudo anular'); ver();
 }
+async function abrirHistorial(mid) {
+  const r = await fetch(`${P}/api/movimientos/${mid}/gcg-historial`, { credentials: 'same-origin' }); const d = await r.json();
+  const m = datos.movimientos.find(x => x.id == mid) || {};
+  $('h-titulo').textContent = [m.patente, m.patente2, m.patente3].filter(Boolean).join(' + ');
+  $('h-cuerpo').innerHTML = (d.historial || []).slice().reverse().map(h => `<div class="card" style="margin:.5rem 0">
+      <b>${esc(h.consultado.slice(0, 16).replace('T', ' '))}</b> <span class="suave">· ${h.motivo === 'carga' ? 'al cargar' : 'volvió a consultar'}${h.por ? ' · ' + esc(h.por) : ''}</span>
+      ${gcgPartes(h.detalle).map(x => `<div style="margin-top:.3rem"><b>${esc(x.titulo)}</b> ${SEMA[x.color] || '⚪'} <span class="suave">${esc(x.fuente || '')}</span>
+        ${(x.pendientes || []).length ? '<ul style="margin:.2rem 0">' + x.pendientes.map(p => `<li>${esc(docTxt(p))}</li>`).join('') + '</ul>' : '<span class="suave"> sin pendientes</span>'}</div>`).join('')}
+    </div>`).join('') || '<p class="vacio">Sin consultas guardadas.</p>';
+  $('d-hist').showModal();
+}
+document.body.addEventListener('keydown', e => { const h = e.target.closest && e.target.closest('[data-hist]'); if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); abrirHistorial(h.dataset.hist); } });
 document.body.addEventListener('click', async e => {
+  const h = e.target.closest('[data-hist]'); if (h) return abrirHistorial(h.dataset.hist);
   const g = e.target.closest('[data-gcg]');
   if (g) {
     g.disabled = true; g.textContent = 'Consultando…';

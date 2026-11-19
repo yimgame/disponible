@@ -27,7 +27,8 @@
   label { display: grid; gap: .3rem; font-weight: 600; font-size: .9rem; }
   input, button { font: inherit; }
   input[type=text], input[type=number], input[type=datetime-local], input[type=tel] { width: 100%; padding: .8rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 1.1rem; }
-  #patente { font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+  .pat-in { font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+  select { width: 100%; padding: .8rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 1.05rem; }
   .seg { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
   .seg button { padding: .8rem; border-radius: 10px; border: 2px solid var(--line); background: var(--bg); color: var(--fg); font-weight: 700; cursor: pointer; }
   .seg button[aria-pressed=true][data-v=refri] { border-color: var(--refri); color: var(--refri); }
@@ -82,8 +83,22 @@
 
   <section class="card" id="form" hidden>
     <h2>Informar unidad</h2>
-    <label for="patente">Patente
-      <input id="patente" type="text" list="mis-unidades" autocomplete="off" placeholder="AB123CD" maxlength="10">
+    <label for="config">Cómo viene el equipo
+      <select id="config">
+        <option value="tractor_semi">Tractor + Semi</option>
+        <option value="chasis_acoplado">Chasis + Acoplado</option>
+        <option value="tractor_bitren">Tractor + Bitren + Semi</option>
+        <option value="chasis_solo">Chasis / balancín solo (8 a 16 pallets)</option>
+      </select>
+    </label>
+    <label for="patente"><span id="l-p1">Unidad 1 · Tractor</span>
+      <input id="patente" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AB123CD" maxlength="10">
+    </label>
+    <label for="patente2" id="w-p2"><span id="l-p2">Unidad 2 · Semi</span>
+      <input id="patente2" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AC456EF" maxlength="10">
+    </label>
+    <label for="patente3" id="w-p3" hidden><span id="l-p3">Unidad 3 · Semi</span>
+      <input id="patente3" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AD789GH" maxlength="10">
     </label>
     <datalist id="mis-unidades"></datalist>
     <div id="alertas" hidden></div>
@@ -134,19 +149,34 @@ function aviso(texto, ok) { const m = $('msg'); m.textContent = texto; m.classNa
 function setTipo(v) { tipo = v; document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
 const norm = p => p.replace(/[\s.\-]/g, '').toUpperCase();
 const fh = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}` : '';
-const SEM = { verde: '🟢 Verde', amarillo: '🟡 Amarillo', rojo: '🔴 Rojo' };
+const CONFIG = { tractor_semi: ['Tractor', 'Semi'], chasis_acoplado: ['Chasis', 'Acoplado'],
+                 tractor_bitren: ['Tractor', 'Bitren', 'Semi'], chasis_solo: ['Chasis / balancín'] };
+function aplicarConfig() {
+  const roles = CONFIG[$('config').value];
+  roles.forEach((r, i) => ($('l-p' + (i + 1)).textContent = `Unidad ${i + 1} · ${r}`));
+  $('w-p2').hidden = roles.length < 2; $('w-p3').hidden = roles.length < 3;
+  if (roles.length < 2) $('patente2').value = ''; if (roles.length < 3) $('patente3').value = '';
+  $('pallets').placeholder = $('config').value === 'chasis_solo' ? 'de 8 a 16' : 'ej. 26';
+  revisar();
+}
+const patentesForm = () => ['patente', 'patente2', 'patente3'].slice(0, CONFIG[$('config').value].length).map(id => norm($(id).value));
+const SEM = { verde: '🟢 Verde', amarillo: '🟡 Amarillo', rojo: '🔴 Rojo', sin_dato: '⚪ No figura en GCG' };
 const EST = { vencido: 'vencido', falta: 'falta cargar', 'por vencer': 'por vencer' };
 // Qué le falta en GCG (unidad y chofer): lo que tiene que actualizar el transporte.
+function gcgBloque(titulo, x, completo) {
+  const pend = x.pendientes || [];
+  const lista = pend.length ? '<ul>' + pend.map(p => `<li>${esc(p.documento)} — <b>${EST[p.estado] || esc(p.estado)}</b>${p.fecha ? ' (' + p.fecha.split('-').reverse().join('/') + ')' : ''}${p.critico ? ' · <b>bloquea</b>' : ''}</li>`).join('') + '</ul>' : '';
+  const nota = pend.length ? `<span class="hint">${pend.length} documento(s) para actualizar</span>` : x.color === 'sin_dato' ? '' : '<span class="hint">sin pendientes</span>';
+  return `<div><div class="fila"><span>${titulo}:</span><span class="sem ${x.color}">${SEM[x.color] || ''}</span>${nota}</div>${completo || x.color !== 'verde' ? lista : ''}</div>`;
+}
+// Qué le falta en GCG (cada patente del equipo y el chofer): lo que tiene que actualizar el transporte.
 function gcgHtml(g, completo) {
   if (!g) return '';
-  return '<div class="gcg">' + ['unidad', 'chofer'].filter(k => g[k] && g[k].color !== 'sin_dato').map(k => {
-    const x = g[k], pend = x.pendientes || [];
-    const lista = pend.length ? '<ul>' + pend.map(p => `<li>${esc(p.documento)} — <b>${EST[p.estado] || esc(p.estado)}</b>${p.fecha ? ' (' + fh(p.fecha + 'T00:00').slice(0, 5) + '/' + p.fecha.slice(0, 4) + ')' : ''}${p.critico ? ' · <b>bloquea</b>' : ''}</li>`).join('') + '</ul>' : '';
-    return `<div><div class="fila"><span>${k === 'unidad' ? 'Unidad' : 'Chofer'}:</span><span class="sem ${x.color}">${SEM[x.color] || ''}</span>` +
-      `${pend.length ? `<span class="hint">${pend.length} documento(s) para actualizar</span>` : '<span class="hint">sin pendientes</span>'}</div>` +
-      (completo || x.color !== 'verde' ? lista : '') + '</div>';
-  }).join('') + '</div>';
+  const unidades = g.unidades || (g.unidad ? [{ ...g.unidad, patente: 'Unidad', rol: '' }] : []);
+  return '<div class="gcg">' + unidades.map(u => gcgBloque(`${u.rol ? esc(u.rol) + ' ' : ''}<span class="pat">${esc(u.patente)}</span>`, u, completo)).join('') +
+    (g.chofer ? gcgBloque('Chofer', g.chofer, completo) : '') + '</div>';
 }
+const algoPendiente = (g) => g && [...(g.unidades || [g.unidad]).filter(Boolean), g.chofer].filter(Boolean).some(x => x.color !== 'verde');
 function ahoraLocal(min = 0) { const d = new Date(Date.now() + min * 60000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
 
 function pintar(d) {
@@ -165,12 +195,12 @@ function pintar(d) {
   if (d.cuota) { $('cuota').hidden = false; const f = Math.max(0, d.cuota - cargadas);
     $('cuota').textContent = f ? `Cuota del día: ${cargadas} de ${d.cuota} — faltan ${f}` : `Cuota del día cumplida: ${cargadas} de ${d.cuota} ✔`; }
   $('lista').innerHTML = d.filas.length ? d.filas.map(a => a.estado === 'usada'
-      ? `<li class="usada"><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span><span class="det">${a.pallets} pl</span><span class="usado">✔ ya se usó</span></li>`
-      : `<li class="carga"><div class="top"><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span>
+      ? `<li class="usada"><span class="pat">${(a.equipo && a.equipo.length ? a.equipo.map(e => esc(e.patente)) : [esc(a.patente)]).join(' + ')}</span><span class="tag ${a.tipo}">${a.tipo}</span><span class="det">${a.pallets} pl</span><span class="usado">✔ ya se usó</span></li>`
+      : `<li class="carga"><div class="top"><span class="pat">${(a.equipo && a.equipo.length ? a.equipo.map(e => esc(e.patente)) : [esc(a.patente)]).join(' + ')}</span><span class="tag ${a.tipo}">${a.tipo}</span>
          <span class="det">${a.pallets} pl${a.eta ? ' · llega ' + fh(a.eta) : ''}${a.bloqueado ? ' · ⛔ bloqueada' : ''}</span>
          <button type="button" data-sacar="${esc(a.patente)}" data-tipo="${a.tipo}" data-pallets="${a.pallets}">Sacar</button></div>
          ${gcgHtml(a.gcg)}
-         ${a.gcg && ['unidad', 'chofer'].some(k => a.gcg[k] && a.gcg[k].color !== 'verde' && a.gcg[k].color !== 'sin_dato')
+         ${algoPendiente(a.gcg)
            ? `<div><button type="button" class="btn-gcg" data-gcg="${a.movimiento_id}">🔄 Ya actualicé los documentos: volver a consultar GCG</button></div>` : ''}</li>`).join('')
     : '<li class="vacio">Todavía no informaste unidades hoy.</li>';
   $('form').hidden = false; $('hoy').hidden = false;
@@ -193,11 +223,13 @@ let tAlert;
 function revisar() {
   clearTimeout(tAlert);
   tAlert = setTimeout(async () => {
-    const p = norm($('patente').value), dni = $('chofer').value.replace(/\D/g, '');
-    if (!/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(p)) { mostrarAlertas([]); return; }
-    try { const r = await fetch(`${API}/alertas?patente=${encodeURIComponent(p)}&dni=${encodeURIComponent(dni)}`); const d = await r.json();
+    const ps = patentesForm(), dni = $('chofer').value.replace(/\D/g, '');
+    const validas = ps.filter(p => /^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(p));
+    if (!validas.length) { mostrarAlertas([]); return; }
+    try { const q = new URLSearchParams({ patente: ps[0] || '', patente2: ps[1] || '', patente3: ps[2] || '', dni });
+      const r = await fetch(`${API}/alertas?${q}`); const d = await r.json();
       mostrarAlertas(d.alertas);
-      if (d.unidad && !unidades[p]) { if (d.unidad.tipo) setTipo(d.unidad.tipo); if (d.unidad.pallets && !$('pallets').value) $('pallets').value = d.unidad.pallets; }
+      if (d.unidad) { if (d.unidad.tipo && !tipo) setTipo(d.unidad.tipo); if (d.unidad.pallets && !$('pallets').value) $('pallets').value = d.unidad.pallets; }
     } catch { /* sin conexión: se valida al enviar */ }
   }, 350);
 }
@@ -212,28 +244,35 @@ async function enviar(accion, item) {
     aviso((accion === 'agrega' ? (bloq ? '⛔ Cargada como BLOQUEADA: ' : '✔ Disponible: ') : '✖ Sacada: ') + item.patente, !bloq);
     const cargada = accion === 'agrega' ? d.filas.find(f => f.patente === item.patente) : null;
     const caja = $('resultado-gcg');
-    if (cargada && cargada.gcg && Object.values(cargada.gcg).some(x => x.color !== 'verde' && x.color !== 'sin_dato')) {
-      caja.innerHTML = `<h2>GCG — ${esc(item.patente)}: lo que tenés que actualizar</h2>${gcgHtml(cargada.gcg, true)}` +
-        `<p class="hint">Actualizalo en GCG y después tocá «🔄 volver a consultar» en la unidad, abajo. ${bloq ? 'Mientras tanto la unidad figura bloqueada.' : ''}</p>`;
+    if (cargada && cargada.gcg) {
+      const pend = algoPendiente(cargada.gcg);
+      caja.style.borderLeftColor = bloq ? 'var(--bad)' : pend ? 'var(--warn)' : 'var(--accent)';
+      caja.innerHTML = `<h2>GCG — ${esc(item.patente)}${pend ? ': lo que tenés que actualizar' : ': en orden ✔'}</h2>${gcgHtml(cargada.gcg, true)}` +
+        (pend ? `<p class="hint">Actualizalo en GCG y después tocá «🔄 volver a consultar» en la unidad, abajo. ${bloq ? 'Mientras tanto la unidad figura bloqueada.' : ''}</p>` : '');
       caja.hidden = false; caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else { caja.hidden = true; }
-    $('patente').value = ''; $('pallets').value = ''; $('comentario').value = ''; $('chofer').value = ''; mostrarAlertas([]); setTipo(''); pintar(d);
+    ['patente', 'patente2', 'patente3', 'pallets', 'comentario', 'chofer'].forEach(id => ($(id).value = '')); mostrarAlertas([]); setTipo(''); pintar(d);
   } catch (e) { aviso(e.message, false); } finally { btns.forEach(b => b.disabled = false); }
 }
 
 function leerForm(accion) {
-  const patente = norm($('patente').value), pallets = Number($('pallets').value);
-  if (!/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(patente)) { aviso('Revisá la patente (ej. AB123CD o ABC123)', false); return null; }
+  const ps = patentesForm(), patente = ps[0], pallets = Number($('pallets').value), roles = CONFIG[$('config').value];
+  const ok = p => /^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{5,8}$/.test(p);
+  if (!ok(patente)) { aviso(`Revisá la patente de la unidad 1 (${roles[0].toLowerCase()})`, false); return null; }
   if (accion === 'quita') return { patente };
+  for (let i = 1; i < roles.length; i++) if (!ok(ps[i])) { aviso(`Falta la patente de la unidad ${i + 1} (${roles[i].toLowerCase()})`, false); return null; }
+  if ($('config').value === 'chasis_solo' && !(pallets >= 8 && pallets <= 16)) { aviso('Un chasis / balancín solo lleva de 8 a 16 pallets', false); return null; }
   if (!tipo) { aviso('Elegí si es Refrigerado o Seco', false); return null; }
   if (!(pallets >= 1 && pallets <= 40)) { aviso('Poné la cantidad de pallets (1 a 40)', false); return null; }
   const dni = $('chofer').value.replace(/\D/g, '');
   if (dni && !/^\d{6,12}$/.test(dni)) { aviso('Revisá el DNI del chofer', false); return null; }
-  return { patente, tipo, pallets, eta: $('eta').value, chofer_dni: dni };
+  return { patente, patente2: ps[1] || '', patente3: ps[2] || '', configuracion: $('config').value, tipo, pallets, eta: $('eta').value, chofer_dni: dni };
 }
 
-$('patente').addEventListener('input', () => { const u = unidades[norm($('patente').value)];
-  if (u) { setTipo(u.tipo); $('pallets').value = u.pallets || ''; } revisar(); });
+document.querySelectorAll('.pat-in').forEach(el => el.addEventListener('input', () => {
+  const ps = patentesForm().filter(Boolean), u = unidades[ps[ps.length - 1]];       // tipo y pallets: de la unidad que carga
+  if (u) { setTipo(u.tipo); $('pallets').value = u.pallets || ''; } revisar(); }));
+$('config').addEventListener('change', aplicarConfig);
 $('chofer').addEventListener('input', revisar);
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setTipo(b.dataset.v)));
 $('btn-si').addEventListener('click', () => { const i = leerForm('agrega'); if (i) enviar('agrega', i); });

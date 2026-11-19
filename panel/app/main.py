@@ -251,6 +251,13 @@ def api_reconsultar_gcg(req: Request, mid: int):
         return _err(e)
 
 
+@app.get(PREFIJO + "/api/movimientos/{mid}/gcg-historial")
+def api_historial_gcg(req: Request, mid: int):
+    """Cómo estaban los documentos en cada consulta de esa carga (carga y reconsultas)."""
+    _requiere(req)
+    return {"historial": logica.historial_gcg(mid)}
+
+
 @app.post(PREFIJO + "/api/usos/{uid}/anular")
 def api_anular(req: Request, uid: int):
     _mismo_origen(req)
@@ -593,11 +600,13 @@ def publico_mio(token: str):
 
 
 @app.get(PREFIJO + "/publico/t/{token}/alertas")
-def publico_alertas(token: str, patente: str = "", dni: str = ""):
+def publico_alertas(token: str, patente: str = "", patente2: str = "", patente3: str = "", dni: str = ""):
     _transporte_token(token)
-    u = logica.info_unidad(patente)["unidad"]
-    return {"alertas": logica.alertas(patente, dni) if logica.patente_valida(logica.norm_patente(patente)) else [],
-            "unidad": {k: u[k] for k in ("tipo", "pallets")} if u else None}
+    pats = [logica.norm_patente(x) for x in (patente, patente2, patente3) if logica.patente_valida(logica.norm_patente(x))]
+    u = logica.info_unidad(pats[-1])["unidad"] if pats else None
+    return {"alertas": logica.alertas(pats, dni) if pats or dni else [],
+            "unidad": {k: u[k] for k in ("tipo", "pallets", "tipo_equipo")} if u else None,
+            "clases": {p: logica.clase_equipo(p) for p in pats}}
 
 
 @app.post(PREFIJO + "/publico/t/{token}/gcg/{mid}")
@@ -644,7 +653,7 @@ def ag_transportes(req: Request):
 @app.get("/api/v1/unidad/{patente}")
 def ag_unidad(req: Request, patente: str):
     _agente(req)
-    return {**logica.info_unidad(patente), "alertas": logica.alertas(patente)}
+    return {**logica.info_unidad(patente), "alertas": logica.alertas([patente])}
 
 
 @app.get("/api/v1/chofer/{dni}")

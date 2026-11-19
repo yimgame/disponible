@@ -118,3 +118,4 @@ pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; 
 @media (max-width: 40rem) { .menu-desplegable { right: auto; left: 0; } }
 
 .gcg-celda { font-size: .82rem; line-height: 1.35; white-space: normal; display: grid; gap: .15rem; }
+.gcg-celda, .gcg-mini { cursor: pointer; } .gcg-celda:hover, .gcg-mini:hover { color: var(--accent); }

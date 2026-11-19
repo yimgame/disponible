@@ -52,7 +52,8 @@
     <li><b>El proveedor carga</b> la unidad (y el DNI del chofer) en su link: se consulta GCG en vivo (unidad por dominio, chofer por DNI).</li>
     <li><b>Se le informa en el momento qué le falta</b>: cada documento vencido, faltante o por vencer, de la unidad y del chofer, y cuáles bloquean.
       Si algo crítico está vencido la unidad queda <b>bloqueada</b> en el disponible.</li>
-    <li><b>En el panel</b>, la columna <b>GCG</b> de «Unidades del día» muestra lo mismo (filtro «Con pendientes de GCG»): el analista ya sabe qué gestionar.</li>
+    <li><b>En el panel</b>, la columna <b>GCG</b> de «Unidades del día» muestra lo mismo por patente y chofer (filtro «Con pendientes de GCG»); pasando el mouse
+      se ven los documentos, y tocándola el <b>historial</b>: cómo estaban los documentos al cargar y en cada reconsulta. En <b>Movimientos</b>, «GCG al cargar».</li>
     <li>Cuando el proveedor actualiza los documentos en GCG, toca <b>«🔄 Ya actualicé los documentos: volver a consultar GCG»</b> en su link
       (o el analista <b>🔄 GCG</b> en el panel). Si GCG ya la da en orden, <b>se levanta el bloqueo solo</b>.</li>
   </ol><p>Cada reconsulta también se avisa por el webhook (evento <code>gcg_reconsulta</code>) por si se quiere notificar con n8n.</p></details>
@@ -85,7 +86,11 @@
 </section>
 {% endif %}
 <section class="card"><h2>📱 Lo que ve el transporte</h2>
-  <details><summary>Cargar el disponible desde el link</summary><p>Escribe la patente (le sugiere sus unidades), elige <b>Refrigerado</b> o <b>Seco</b>, pallets, <b>ETA</b> (fecha y hora de arribo),
+  <details><summary>Cómo viene el equipo (unidad 1, 2 y 3)</summary><p>Primero elige la configuración: <b>Tractor + Semi</b>, <b>Chasis + Acoplado</b>,
+    <b>Tractor + Bitren + Semi</b> o <b>Chasis / balancín solo</b> (una sola patente, de 8 a 16 pallets). No se puede cargar tractor solo, semi solo,
+    chasis + semi ni tractor + acoplado, y si el maestro de unidades dice que una patente es otra cosa (ej. un chasis puesto como tractor) no la deja.
+    Cada patente se controla en GCG por separado; el tipo y los pallets salen de la unidad que carga (semi, acoplado o chasis).</p></details>
+  <details><summary>Cargar el disponible desde el link</summary><p>Escribe las patentes (le sugiere sus unidades), elige <b>Refrigerado</b> o <b>Seco</b>, pallets, <b>ETA</b> (fecha y hora de arribo),
     opcional el <b>DNI del chofer</b> y un comentario, y <b>✔ Disponible</b>. Si algo está bloqueado se lo avisa antes de cargar. Con <b>Sacar</b> la quita. Ve su total del día y su cuota.</p></details>
 </section>
 {% if 'usuarios' in u.puede %}
