@@ -5,6 +5,8 @@
   <p class="sub">Subí los exportes tal como salen. Se leen en tu navegador y al panel llegan solo las columnas que usa el disponible.
     Primero <b>Revisar</b> (no guarda nada) y después <b>Importar</b>.</p></header>
 
+{% if msg %}<p class="aviso">✔ {{ msg }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
 <section class="card imp" data-tipo="unidades">
   <h2>1 · Maestro de unidades (exporte de equipos)</h2>
   <p class="suave">Patente («Inicial de equipo»), tipo de equipo (REF = refrigerado), PALLET_CAP, KG_CAP, Ejes, <b>Bloqueado</b>, <b>Documento Vencido</b>,
@@ -18,7 +20,8 @@
 <section class="card imp" data-tipo="gcg">
   <h2>2 · GCG (ExportaciónExcel)</h2>
   <p class="suave">Trabajadores (por DNI) y vehículos (por dominio): estado (habilitado / inhabilitado / bloqueado), contratista y el vencimiento de cada documento.
-    Sirve para la <b>consulta de documentos</b> y para avisar al cargar: chofer o unidad no habilitados = bloqueado; documentos vencidos = aviso.</p>
+    Arma el <b>semáforo de choferes</b> (🟢 habilitado · 🟡 no habilitado sin críticos vencidos · 🔴 críticos vencidos = bloquea) con los
+    <a href="#criticos">documentos críticos</a> de abajo, y se usa para la consulta y para avisar al transporte al cargar.</p>
   <div class="filtros"><label>Archivo (.xlsx) <input type="file" accept=".xlsx,.xls,.csv"></label>
     <button type="button" class="revisar">🔍 Revisar</button><button type="button" class="pri importar" disabled>⬆ Importar</button></div>
   <div class="res"></div>
@@ -32,6 +35,30 @@
     <label class="switch"><input type="checkbox" class="reemplazar" checked> Reemplazar la lista anterior</label>
     <button type="button" class="revisar">🔍 Revisar</button><button type="button" class="pri importar" disabled>⬆ Importar</button></div>
   <div class="res"></div>
+</section>
+
+<section class="card" id="criticos">
+  <h2>Documentos críticos (semáforo de choferes)</h2>
+  <p class="suave">Mismo criterio que la app de bloqueos: si un chofer tiene vencido alguno de estos documentos queda en <b>🔴 rojo</b> (bloquea);
+    si no está habilitado en GCG pero no tiene críticos vencidos, <b>🟡 amarillo</b>; habilitado y al día, <b>🟢 verde</b>. Si GCG lo da por habilitado,
+    un crítico con fecha vencida no cuenta (es uno que ya no le pide). Cada documento se controla solo para sus <b>países</b> (AR, PY, BO…; vacío = todos).
+    El <b>nombre</b> tiene que coincidir con la columna del exporte de GCG; el <b>Nº GCG</b> es para la consulta en vivo.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Documento</th><th>Nº GCG</th><th>Países</th><th>Estado</th><th></th></tr></thead>
+    <tbody>{% for d in criticos %}
+      <tr class="{{ '' if d.activo else 'apagado' }}">
+        <td><input form="dc{{ d.id }}" name="nombre" value="{{ d.nombre }}" maxlength="120" size="34"></td>
+        <td><input form="dc{{ d.id }}" name="gcg_numero" value="{{ d.gcg_numero or '' }}" size="4"></td>
+        <td><input form="dc{{ d.id }}" name="paises" value="{{ d.paises }}" size="8"></td>
+        <td><select form="dc{{ d.id }}" name="activo"><option value="1" {{ 'selected' if d.activo }}>Activo</option><option value="0" {{ 'selected' if not d.activo }}>No se controla</option></select></td>
+        <td><button form="dc{{ d.id }}" class="chico pri">Guardar</button></td></tr>
+    {% endfor %}</tbody></table></div>
+  {% for d in criticos %}<form method="post" action="{{ P }}/criticos" id="dc{{ d.id }}"><input type="hidden" name="id" value="{{ d.id }}"></form>{% endfor %}
+  <form method="post" action="{{ P }}/criticos" class="filtros" style="margin-top:.6rem">
+    <label>Nuevo documento crítico <input name="nombre" required maxlength="120" placeholder="tal como figura en el exporte de GCG"></label>
+    <label>Nº GCG <input name="gcg_numero" size="4"></label><label>Países <input name="paises" value="AR" size="8"></label>
+    <button class="pri">Agregar</button>
+  </form>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -48,6 +75,7 @@ const DEF = {
     nro_proveedor: ["idtransportista", "nroproveedor", "nrodeproveedor", "proveedor"], transportista: ["transportista", "razonsocial"] } },
   gcg: { clave: ["nombredominio", "cuitcuil"], campos: {
     tipo: ["tipo"], id: ["id"], nombre: ["nombredominio"], cuil: ["cuitcuil"], dni: ["dni"], estado: ["estado"], vencimiento: ["vencimiento"],
+    pais: ["pais"], situacion: ["situacion"],
     contratista: ["contratista"], subcontratista: ["subcontratista"] }, documentosDesde: "condiciontrabajador" },
   bloqueados: { clave: [], campos: { patente: ["patente", "dominio", "unidad", "inicialdeequipo"], dni: ["dni", "documento", "nrodocumento", "cuil"],
     motivo: ["motivo", "observacion", "observaciones", "comentario", "detalle", "causa"] } },

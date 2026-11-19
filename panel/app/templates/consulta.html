@@ -1,8 +1,25 @@
 {% extends "base.html" %}
-{% block titulo %}Consulta · Disponible{% endblock %}
+{% block titulo %}Consulta · Disponible<script>
+const bv = document.getElementById("b-vivo");
+if (bv) bv.onclick = async () => {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const v = document.getElementById("vivo"); v.innerHTML = '<p class="vacio">Consultando GCG…</p>'; bv.disabled = true;
+  try {
+    const r = await fetch("{{ P }}/api/gcg/" + bv.dataset.dni, { credentials: "same-origin" }); const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "error");
+    const chip = { verde: '<span class="chip ok">🟢 Verde</span>', amarillo: '<span class="chip warn">🟡 Amarillo</span>', rojo: '<span class="chip bad">🔴 Rojo</span>' }[d.semaforo.color];
+    v.innerHTML = `<p class="aviso">En vivo (${esc(d.nombre || "")}${d.pais ? " · " + esc(d.pais) : ""}): ${chip} ${esc(d.semaforo.texto)}</p>` +
+      `<div class="tabla"><table><thead><tr><th>Documento crítico</th><th>Vence</th><th>Estado</th></tr></thead><tbody>` +
+      d.criticos.map((c) => `<tr><td>${esc(c.documento)}</td><td>${esc(c.fecha || "—")}</td><td>${esc(c.estado)}</td></tr>`).join("") + `</tbody></table></div>`;
+  } catch (e) { v.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+  bv.disabled = false;
+};
+</script>
+{% endblock %}
 {% block contenido %}
 {% set gestion = 'gestion' in u.puede %}
 {% macro dmy(f) %}{{ f[8:10] }}/{{ f[5:7] }}/{{ f[0:4] }}{% endmacro %}
+{% macro sem(color) %}{% if color == 'verde' %}<span class="chip ok">🟢 Verde</span>{% elif color == 'amarillo' %}<span class="chip warn">🟡 Amarillo</span>{% elif color == 'rojo' %}<span class="chip bad">🔴 Rojo</span>{% else %}<span class="chip na">sin dato</span>{% endif %}{% endmacro %}
 <header><h1>Consulta de unidad o chofer</h1>
   <p class="sub">Estado en el maestro de unidades, documentos de GCG y bloqueos. Lo mismo que se le avisa al transporte cuando la carga.</p></header>
 {% if msg %}<p class="aviso">{{ msg }}</p>{% endif %}
@@ -36,7 +53,25 @@
   {% else %}<p class="vacio">No está en el maestro de unidades (importalo en <a href="{{ P }}/importar">Importar</a>).</p>{% endif %}
   {% endif %}
 
-  <h3>GCG</h3>
+  {% if res.tipo == 'chofer' %}
+  <h3>Control de documentos (GCG)</h3>
+  <p>{{ sem(res.semaforo.color) }} {{ res.semaforo.texto }}</p>
+  {% if res.semaforo.criticos %}
+  <div class="tabla"><table>
+    <thead><tr><th>Documento crítico</th><th>Vence</th><th>Estado</th></tr></thead>
+    <tbody>{% for d in res.semaforo.criticos %}
+      <tr><td>{{ d.documento }}</td><td>{{ dmy(d.fecha) if d.fecha else '—' }}</td>
+        <td>{% if d.estado == 'vencido' %}<span class="chip bad">✖ vencido</span>{% elif d.estado == 'por vencer' %}<span class="chip warn">⚠ por vencer</span>
+            {% elif d.estado == 'vigente' %}<span class="chip ok">✔ vigente</span>{% else %}<span class="chip na">{{ d.estado }}</span>{% endif %}</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
+  {% if gcg_vivo %}
+  <p style="margin-top:.6rem"><button type="button" class="chico" id="b-vivo" data-dni="{{ res.dni }}">🔄 Consultar ahora en GCG (en vivo)</button></p>
+  <div id="vivo"></div>
+  {% endif %}
+  {% endif %}
+
+  <h3>GCG — exporte</h3>
   {% if res.gcg %}{% set g = res.gcg %}
   <p><b>{{ g.nombre }}</b>{% if g.cuil %} · CUIL {{ g.cuil }}{% endif %} ·
     {% if g.estado == 'HABILITADO' %}<span class="chip ok">Habilitado</span>{% else %}<span class="chip bad">{{ (g.estado or 'sin estado')|capitalize }}</span>{% endif %}
@@ -75,6 +110,26 @@
   {% endif %}
 </section>
 {% endif %}
+
+<section class="card">
+  <h2>Semáforo de choferes (GCG)</h2>
+  {% if resumen.actualizado %}
+  <div class="kpis" style="margin-bottom:.8rem">
+    <div class="kpi"><b>{{ resumen.verde }}</b><span>🟢 verde · habilitados, críticos al día</span></div>
+    <div class="kpi u"><b>{{ resumen.amarillo }}</b><span>🟡 amarillo · no habilitados, sin críticos vencidos</span></div>
+    <div class="kpi b"><b>{{ resumen.rojo }}</b><span>🔴 rojo · críticos vencidos o dados de baja (bloquean)</span></div>
+  </div>
+  <details><summary>Ver los {{ resumen.lista|length }} en rojo y amarillo</summary>
+  <div class="tabla"><table>
+    <thead><tr><th>Estado</th><th>Chofer</th><th>DNI</th><th>Contratista</th><th>Motivo</th></tr></thead>
+    <tbody>{% for x in resumen.lista[:500] %}
+      <tr><td>{{ sem(x.color) }}</td><td>{{ x.nombre }}</td><td class="pat"><a href="?q={{ x.dni }}">{{ x.dni }}</a></td><td>{{ x.contratista or '' }}</td><td>{{ x.texto }}</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% if resumen.lista|length > 500 %}<p class="vacio">Mostrando 500 de {{ resumen.lista|length }}.</p>{% endif %}
+  </details>
+  <p class="suave">Exporte de GCG del {{ resumen.actualizado[:10] }}. Críticos y países en <a href="{{ P }}/importar#criticos">Importar → Documentos críticos</a>.</p>
+  {% else %}<p class="vacio">Todavía no se importó el exporte de GCG.</p>{% endif %}
+</section>
 
 <section class="card">
   <h2>Bloqueos activos ({{ bloqueos|length }})</h2>

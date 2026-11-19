@@ -29,6 +29,9 @@ Para publicarlo en internet poné adelante un proxy con HTTPS.
   movimientos, CSV, alta de transportes.
 - **Transportes**: links, cuota, celular, nº de proveedor, baja, link nuevo.
 - **Consulta**: patente o DNI → maestro, GCG con documentos, bloqueos; bloquear / desbloquear a mano.
+  **Semáforo documental del chofer** (mismo criterio que la app de bloqueos): 🟢 habilitado y críticos al día,
+  🟡 no habilitado sin críticos vencidos (avisa), 🔴 algún documento crítico vencido o dado de baja (bloquea).
+  Documentos críticos y países configurables; consulta en vivo a la API de GCG por DNI si hay `GCG_API_KEY`.
 - **Importar**: maestro de unidades (exporte de equipos), GCG (ExportaciónExcel) y lista de bloqueados. Los Excel se
   leen en el navegador y al servidor van solo las columnas que se usan.
 - **Integraciones**: estado del webhook, últimos envíos, documentación de la API.

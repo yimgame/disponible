@@ -50,8 +50,14 @@
 <section class="card"><h2>⛔ Bloqueos y documentos</h2>
   <details><summary>De dónde salen los bloqueos</summary><ul>
     <li><b>Maestro de unidades</b>: columna Bloqueado = Y (con el documento vencido).</li>
-    <li><b>GCG</b>: chofer o unidad que no está <i>HABILITADO</i>. Los documentos vencidos o por vencer (15 días) son avisos.</li>
+    <li><b>GCG — semáforo del chofer</b> (mismo criterio que la app de bloqueos): 🟢 <b>verde</b> habilitado y críticos al día; 🟡 <b>amarillo</b>
+      no habilitado pero sin críticos vencidos (avisa, no bloquea); 🔴 <b>rojo</b> algún <b>documento crítico vencido</b> o dado de baja (<b>bloquea</b>).
+      Los críticos (pago bancarizado, Federación de Camioneros, sindicato, F931, planilla de kilometraje, recibo de haberes) y sus países se
+      configuran en Importar → Documentos críticos. Los críticos por vencer (7 días) y otros documentos vencidos son avisos.</li>
     <li><b>Lista de bloqueados</b> volcada en Importar, y <b>bloqueos manuales</b> desde Consulta.</li></ul></details>
+  <details><summary>Ver todos los choferes en rojo o amarillo</summary><p>En <b>Consulta</b>, abajo: <b>Semáforo de choferes (GCG)</b> con los totales y la lista
+    de los que están en rojo o amarillo con el motivo. Si está configurada la API de GCG, en la consulta de un chofer aparece <b>🔄 Consultar ahora en GCG</b>
+    para verlo en vivo.</p></details>
   <details><summary>Consultar una unidad o un chofer</summary><p><b>Consulta</b>: poné la patente o el DNI. Muestra los avisos, el maestro de la unidad, el estado y
     los documentos de GCG con su vencimiento, y los bloqueos.{% if gestion %} Desde ahí podés <b>bloquear</b> o <b>quitar</b> un bloqueo manual.{% endif %}</p></details>
 </section>

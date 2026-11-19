@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
-from . import auth, db, logica, respaldo, webhooks
+from . import auth, db, gcg_api, logica, respaldo, webhooks
 
 BASE = Path(__file__).resolve().parent
 PREFIJO = "/panel"
@@ -409,12 +409,34 @@ def consulta(req: Request, q: str = "", msg: str = ""):
         pat = logica.norm_patente(q)
         if dni and len(dni) >= 6 and not any(ch.isalpha() for ch in q):
             res = {"tipo": "chofer", **logica.info_chofer(dni), "alertas": logica.alertas(None, dni)}
+            res["semaforo"] = logica.semaforo_chofer(res["gcg"])
         else:
             res = {"tipo": "unidad", **logica.info_unidad(pat), "alertas": logica.alertas(pat)}
         if res.get("gcg"):
             res["gcg"]["docs"] = sorted(json.loads(res["gcg"]["documentos"] or "{}").items())
     return plantillas.TemplateResponse(req, "consulta.html", {"u": u, "q": q, "res": res, "msg": msg, "hoy": db.hoy(),
-                                                              "bloqueos": logica.bloqueos()})
+                                                              "bloqueos": logica.bloqueos(), "gcg_vivo": gcg_api.activo(),
+                                                              "resumen": logica.resumen_gcg()})
+
+
+@app.get(PREFIJO + "/api/gcg/{dni}")
+def api_gcg_vivo(req: Request, dni: str):
+    """Consulta en vivo a la API de GCG (si hay GCG_API_KEY)."""
+    _requiere(req)
+    return gcg_api.consultar(dni)
+
+
+@app.post(PREFIJO + "/criticos")
+async def criticos_post(req: Request):
+    _mismo_origen(req)
+    _requiere(req, "gestion")
+    f = {k: str(v) for k, v in (await req.form()).items()}
+    try:
+        logica.guardar_critico(f, _int(f.get("id")))
+        msg = "Documento crítico guardado."
+    except logica.Error as e:
+        return RedirectResponse(f"{PREFIJO}/importar?error={quote(str(e))}#criticos", 303)
+    return RedirectResponse(f"{PREFIJO}/importar?msg={quote(msg)}#criticos", 303)
 
 
 @app.post(PREFIJO + "/consulta/bloqueo")
@@ -436,8 +458,9 @@ async def consulta_bloqueo(req: Request):
 
 # ------------------------------------------------------------------ importar (maestro de unidades, GCG, bloqueados)
 @app.get(PREFIJO + "/importar", response_class=HTMLResponse)
-def importar_pagina(req: Request):
-    return plantillas.TemplateResponse(req, "importar.html", {"u": _requiere(req, "gestion")})
+def importar_pagina(req: Request, msg: str = "", error: str = ""):
+    return plantillas.TemplateResponse(req, "importar.html", {"u": _requiere(req, "gestion"), "msg": msg, "error": error,
+                                                              "criticos": logica.criticos(solo_activos=False)})
 
 
 @app.post(PREFIJO + "/api/importar/{tipo}")

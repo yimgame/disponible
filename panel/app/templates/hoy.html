@@ -112,6 +112,7 @@
 
 <script>
 const P = "{{ P }}", GESTION = {{ 'true' if gestion else 'false' }};
+const SEMA = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };   // semáforo documental del chofer (GCG)
 const BASE_CARGA = location.origin + '/cargar';
 const TZ = 'America/Argentina/Buenos_Aires';
 const $ = id => document.getElementById(id);
@@ -204,7 +205,7 @@ function pintarUnidades() {
   $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
     <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
     <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
-    <td>${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
+    <td>${f.chofer_dni ? `${SEMA[f.chofer_semaforo] || '⚪'} ` : ''}${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
     <td>${f.estado === 'usada' ? `<span class="chip warn">Asignada</span><div class="suave">→ ${esc(f.uso.destino)}${f.uso.viaje ? ' · ' + esc(f.uso.viaje) : ''}</div>` : '<span class="chip ok">Disponible</span>'}
       ${f.bloqueado ? `<div class="bloq">⛔ ${esc(f.bloqueo_motivo)}</div>` : ''}${f.comentario ? `<div class="suave">“${esc(f.comentario)}”</div>` : ''}</td>
     <td>${GESTION ? `<div class="acc">${f.estado === 'disponible' ? `<button type="button" class="pri" data-usar="${esc(f.patente)}">Asignar</button>` :

@@ -155,7 +155,7 @@ def alertas(patente, dni=None):
     g = iu["gcg"]
     if g:
         if g["estado"] and g["estado"] != "HABILITADO":
-            out.append({"nivel": "bloqueo", "texto": f"Unidad {g['estado'].lower()} en GCG"})
+            out.append({"nivel": "aviso", "texto": f"Unidad {g['estado'].lower()} en GCG"})
         v, pv = _docs_vencidos(g["documentos"], hoy)
         if v:
             out.append({"nivel": "aviso", "texto": "GCG unidad, documentos vencidos: " + ", ".join(v)})
@@ -167,15 +167,123 @@ def alertas(patente, dni=None):
             out.append({"nivel": "bloqueo", "texto": f"Chofer bloqueado: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
         g = ic["gcg"]
         if g:
-            if g["estado"] and g["estado"] != "HABILITADO":
-                out.append({"nivel": "bloqueo", "texto": f"Chofer {g['estado'].lower()} en GCG"})
-            v, pv = _docs_vencidos(g["documentos"], hoy)
-            if v:
-                out.append({"nivel": "aviso", "texto": "GCG chofer, documentos vencidos: " + ", ".join(v)})
-            if pv:
-                out.append({"nivel": "aviso", "texto": "GCG chofer, documentos por vencer: " + ", ".join(pv)})
+            sem = semaforo_chofer(g)
+            if sem["color"] == "rojo":
+                out.append({"nivel": "bloqueo", "texto": "Chofer en ROJO: " + sem["texto"]})
+            elif sem["color"] == "amarillo":
+                out.append({"nivel": "aviso", "texto": "Chofer en AMARILLO: " + sem["texto"]})
+            if sem["proximos"]:
+                out.append({"nivel": "aviso", "texto": "Críticos por vencer: " + ", ".join(sem["proximos"])})
+            otros, _ = _docs_vencidos(json.dumps({k: v for k, v in json.loads(g["documentos"] or "{}").items()
+                                                  if not _es_critico(k)}), hoy)
+            if otros:
+                out.append({"nivel": "aviso", "texto": "GCG chofer, otros documentos vencidos: " + ", ".join(otros)})
         elif dni:
             out.append({"nivel": "aviso", "texto": "El chofer no figura en el último exporte de GCG"})
+    return out
+
+
+# ------------------------------------------------------------------ semáforo documental del chofer (criterio de la app de bloqueos)
+DIAS_ALERTA_CRITICOS = 7
+PAIS_ISO = {"argentina": "AR", "paraguay": "PY", "brasil": "BR", "brazil": "BR", "chile": "CL", "bolivia": "BO",
+            "uruguay": "UY", "peru": "PE", "perú": "PE"}
+
+
+def _norm_doc(t):
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(t or "")).encode("ascii", "ignore").decode().lower())
+
+
+def criticos(solo_activos=True):
+    with closing(db.con()) as c:
+        filas = [dict(r) for r in c.execute("SELECT * FROM documentos_criticos ORDER BY orden, nombre")]
+    return [d for d in filas if d["activo"] or not solo_activos]
+
+
+def _es_critico(nombre_doc):
+    n = _norm_doc(nombre_doc)
+    return any(_norm_doc(d["nombre"]) == n for d in criticos())
+
+
+def _aplica(doc, iso):
+    paises = [p for p in re.split(r"[\s,;]+", (doc.get("paises") or "").upper()) if p]
+    return not paises or not iso or iso.upper() in paises
+
+
+def semaforo_chofer(g, hoy=None):
+    """verde = habilitado en GCG sin críticos vencidos · amarillo = no habilitado, sin críticos vencidos ·
+    rojo = algún crítico vencido (o dado de baja). Como en bloqueos: si GCG lo da HABILITADO, un crítico con fecha
+    vencida es uno que ya no le pide (no lo bloquea); cada crítico se controla solo para sus países."""
+    hoy = hoy or db.hoy()
+    if not g:
+        return {"color": "sin_dato", "texto": "no figura en GCG", "vencidos": [], "proximos": [], "criticos": []}
+    docs = {_norm_doc(k): (k, v) for k, v in json.loads(g.get("documentos") or "{}").items()}
+    habilitado = (g.get("estado") or "") == "HABILITADO"
+    baja = "baja" in (g.get("situacion") or "").lower()
+    lim = (date.fromisoformat(hoy) + timedelta(days=DIAS_ALERTA_CRITICOS)).isoformat()
+    vencidos, proximos, detalle = [], [], []
+    for d in criticos():
+        if not _aplica(d, g.get("pais")):
+            continue
+        nombre, valor = docs.get(_norm_doc(d["nombre"]), (d["nombre"], ""))
+        f = _fecha_iso(valor)
+        if not f:
+            est = "sin dato"
+        elif f < hoy:
+            est = "no requerido" if habilitado else "vencido"
+        elif f <= lim:
+            est = "por vencer"
+        else:
+            est = "vigente"
+        txt = f"{d['nombre']} ({f[8:10]}/{f[5:7]}/{f[:4]})" if f else d["nombre"]
+        if est == "vencido":
+            vencidos.append(txt)
+        elif est == "por vencer":
+            proximos.append(txt)
+        detalle.append({"documento": d["nombre"], "fecha": f, "estado": est})
+    if baja:
+        color, texto = "rojo", "dado de baja en GCG"
+    elif vencidos:
+        color, texto = "rojo", "documentación crítica vencida: " + ", ".join(vencidos)
+    elif not habilitado:
+        color, texto = "amarillo", f"{(g.get('estado') or 'sin estado').lower()} en GCG (sin críticos vencidos)"
+    else:
+        color, texto = "verde", "habilitado, críticos al día"
+    return {"color": color, "texto": texto, "vencidos": vencidos, "proximos": proximos, "criticos": detalle}
+
+
+def guardar_critico(datos, did=None):
+    nombre = _txt(datos.get("nombre"), 120)
+    if len(nombre) < 3:
+        raise Error("Poné el nombre del documento tal como figura en GCG.")
+    try:
+        numero = int(datos.get("gcg_numero")) if str(datos.get("gcg_numero") or "").strip() else None
+    except ValueError:
+        raise Error("El Nº GCG tiene que ser un número.")
+    paises = ",".join(dict.fromkeys(p for p in re.split(r"[\s,;]+", str(datos.get("paises") or "").upper()) if p))
+    activo = 0 if str(datos.get("activo", "1")) == "0" else 1
+    with closing(db.con()) as c, c:
+        if did:
+            c.execute("UPDATE documentos_criticos SET nombre=?, gcg_numero=?, paises=?, activo=? WHERE id=?",
+                      (nombre, numero, paises, activo, did))
+        else:
+            if c.execute("SELECT 1 FROM documentos_criticos WHERE nombre=? COLLATE NOCASE", (nombre,)).fetchone():
+                raise Error("Ese documento ya está en la lista.")
+            c.execute("INSERT INTO documentos_criticos (nombre, gcg_numero, paises, activo, orden) VALUES (?,?,?,?,99)",
+                      (nombre, numero, paises, activo))
+
+
+def resumen_gcg():
+    """Semáforo de todos los choferes del último exporte de GCG."""
+    with closing(db.con()) as c:
+        filas = [dict(r) for r in c.execute("SELECT * FROM gcg WHERE tipo='trabajador'")]
+    out = {"verde": 0, "amarillo": 0, "rojo": 0, "lista": [], "actualizado": max((f["actualizado"] for f in filas), default=None)}
+    for g in filas:
+        s = semaforo_chofer(g)
+        out[s["color"]] = out.get(s["color"], 0) + 1
+        if s["color"] in ("rojo", "amarillo"):
+            out["lista"].append({"dni": g["clave"], "nombre": g["nombre"], "contratista": g["contratista"], "color": s["color"],
+                                 "texto": s["texto"]})
+    out["lista"].sort(key=lambda x: (x["color"] != "rojo", x["contratista"] or "", x["nombre"] or ""))
     return out
 
 
@@ -215,11 +323,13 @@ def registrar_movimiento(t, b, informante="link"):
     al = alertas(patente, dni) if accion == "agrega" else []
     bloq = [a["texto"] for a in al if a["nivel"] == "bloqueo"]
     ahora = db.ahora()
-    chofer_nombre = (info_chofer(dni)["gcg"] or {}).get("nombre") if dni else None
+    gch = info_chofer(dni)["gcg"] if dni else None
+    chofer_nombre = (gch or {}).get("nombre")
+    chofer_semaforo = semaforo_chofer(gch)["color"] if dni else None
     fila = {"creado": ahora.isoformat(timespec="microseconds"), "fecha": ahora.date().isoformat(),
             "hora": ahora.strftime("%H:%M"), "transporte_id": t["id"], "transporte": t["nombre"], "patente": patente,
             "tipo": tipo, "pallets": pallets or None, "accion": accion, "eta": eta, "chofer_dni": dni,
-            "chofer_nombre": chofer_nombre, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
+            "chofer_nombre": chofer_nombre, "chofer_semaforo": chofer_semaforo, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
             "bloqueado": 1 if bloq else 0, "bloqueo_motivo": " · ".join(bloq)[:500],
             "avisos": " · ".join(a["texto"] for a in al if a["nivel"] != "bloqueo")[:800]}
     with closing(db.con()) as c, c:
@@ -259,7 +369,8 @@ def estado_dia(fecha=None, transporte_id=None):
             continue
         filas.append({"patente": p, "estado": s["estado"], "transporte_id": m["transporte_id"], "transporte": m["transporte"],
                       "tipo": m["tipo"], "pallets": m["pallets"] or 0, "eta": m["eta"], "hora": m["hora"],
-                      "chofer_dni": m["chofer_dni"], "chofer_nombre": m["chofer_nombre"], "comentario": m["comentario"],
+                      "chofer_dni": m["chofer_dni"], "chofer_nombre": m["chofer_nombre"],
+                      "chofer_semaforo": m.get("chofer_semaforo"), "comentario": m["comentario"],
                       "bloqueado": m["bloqueado"], "bloqueo_motivo": m["bloqueo_motivo"], "movimiento_id": m["id"],
                       "uso": s["uso"]})
     filas.sort(key=lambda f: (f["estado"] != "disponible", f["transporte"] or "", f["eta"] or "9", f["patente"]))
@@ -432,7 +543,9 @@ def importar_gcg(filas, simular=True):
                     "contratista": _txt(f.get("contratista"), 120) or None,
                     "subcontratista": _txt(f.get("subcontratista"), 120) or None,
                     "vencimiento": _fecha_iso(f.get("vencimiento")) or None,
-                    "documentos": json.dumps(docs, ensure_ascii=False), "actualizado": ahora}
+                    "documentos": json.dumps(docs, ensure_ascii=False), "actualizado": ahora,
+                    "pais": PAIS_ISO.get(_clave(f.get("pais")), (str(f.get("pais") or "").strip().upper()[:2] or None)),
+                    "situacion": _txt(f.get("situacion"), 40) or None}
             r["trabajadores" if es_trab else "vehiculos"] += 1
             r["no_habilitados"] += estado not in ("", "HABILITADO")
             r["documentos"] += len(docs)
@@ -541,10 +654,11 @@ CAUSAS = {   # categoría -> [(clave, texto)]
                    ("sacadas", "Sacó unidades ya cargadas"), ("sin_eta", "Cargadas sin ETA")],
     "Unidad": [("bloq_maestro", "Bloqueada en el maestro de unidades"), ("expiracion", "Fecha de expiración vencida"),
                ("fuera_maestro", "Patente que no está en el maestro")],
-    "Chofer": [("chofer_gcg", "Chofer no habilitado en GCG"), ("chofer_bloq", "Chofer bloqueado (lista o manual)"),
-               ("sin_chofer", "Cargadas sin chofer informado"), ("chofer_fuera_gcg", "Chofer que no figura en GCG")],
-    "Documentación": [("docs_unidad", "Documentos vencidos de la unidad"), ("docs_chofer", "Documentos vencidos del chofer"),
-                      ("docs_por_vencer", "Documentos por vencer (15 días)")],
+    "Chofer": [("chofer_rojo", "Chofer en rojo (críticos vencidos)"), ("chofer_gcg", "Chofer en amarillo (no habilitado)"),
+               ("chofer_bloq", "Chofer bloqueado (lista o manual)"), ("sin_chofer", "Cargadas sin chofer informado"),
+               ("chofer_fuera_gcg", "Chofer que no figura en GCG")],
+    "Documentación": [("criticos_por_vencer", "Críticos por vencer (7 días)"), ("docs_chofer", "Otros documentos vencidos del chofer"),
+                      ("docs_unidad", "Documentos vencidos de la unidad"), ("docs_por_vencer", "Documentos de la unidad por vencer")],
     "Bloqueos": [("unidad_gcg", "Unidad no habilitada en GCG"), ("unidad_lista", "Unidad en lista de bloqueados o manual")],
     "Asignación": [("ociosas", "Disponibles que quedaron sin asignar"), ("asignadas_bloq", "Asignadas estando bloqueadas"),
                    ("anuladas", "Asignaciones anuladas")],
@@ -613,14 +727,16 @@ def analisis(desde, hasta, transporte_id=None):
         # cada motivo / aviso por separado (vienen unidos con " · ")
         partes = [x.strip() for x in ((m["bloqueo_motivo"] or "") + " · " + (m.get("avisos") or "")).split(" · ") if x.strip()]
         reglas = (("bloq_maestro", lambda x: x.startswith("Unidad bloqueada en el maestro")),
-                  ("chofer_gcg", lambda x: x.startswith("Chofer ") and x.endswith("en GCG")),
+                  ("chofer_rojo", lambda x: x.startswith("Chofer en ROJO")),
+                  ("chofer_gcg", lambda x: x.startswith("Chofer en AMARILLO") or (x.startswith("Chofer ") and x.endswith("en GCG"))),
+                  ("criticos_por_vencer", lambda x: x.startswith("Críticos por vencer")),
                   ("chofer_bloq", lambda x: x.startswith("Chofer bloqueado:")),
                   ("unidad_gcg", lambda x: x.startswith("Unidad ") and x.endswith("en GCG")),
                   ("unidad_lista", lambda x: x.startswith("Unidad bloqueada:")),
                   ("expiracion", lambda x: "expiración vencida" in x),
                   ("docs_unidad", lambda x: x.startswith("GCG unidad, documentos vencidos")),
-                  ("docs_chofer", lambda x: x.startswith("GCG chofer, documentos vencidos")),
-                  ("docs_por_vencer", lambda x: "documentos por vencer" in x),
+                  ("docs_chofer", lambda x: x.startswith("GCG chofer, otros documentos vencidos") or x.startswith("GCG chofer, documentos vencidos")),
+                  ("docs_por_vencer", lambda x: x.startswith("GCG unidad, documentos por vencer")),
                   ("chofer_fuera_gcg", lambda x: "no figura en el último exporte de GCG" in x))
         for clave, cumple in reglas:
             hit = next((x for x in partes if cumple(x)), None)

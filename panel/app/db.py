@@ -55,7 +55,17 @@ CREATE TABLE IF NOT EXISTS bases (
 """
 
 # Columnas agregadas después de la primera versión (la base se migra sola).
-COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT"]}
+COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT", "chofer_semaforo TEXT"], "gcg": ["pais TEXT", "situacion TEXT"]}
+
+# Documentos críticos (mismo criterio que la app de bloqueos): si uno está vencido el chofer queda en ROJO.
+ESQUEMA_CRITICOS = """
+CREATE TABLE IF NOT EXISTS documentos_criticos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL UNIQUE COLLATE NOCASE, gcg_numero INTEGER,
+    paises TEXT NOT NULL DEFAULT 'AR', activo INTEGER NOT NULL DEFAULT 1, orden INTEGER NOT NULL DEFAULT 0);
+"""
+CRITICOS_DEFAULT = [("Pago bancarizado haberes", 10), ("Pago Federación de Camioneros", 41), ("Pago Sindicato", 7),
+                    ("Pago, DJ F931 y Secuencia 0", 2), ("Planilla kilometraje / horarios y descansos", 9),
+                    ("Recibo de haberes", 3)]
 
 
 def con():
@@ -70,6 +80,11 @@ def iniciar():
     with closing(con()) as c, c:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(ESQUEMA)
+        c.executescript(ESQUEMA_CRITICOS)
+        if not c.execute("SELECT 1 FROM documentos_criticos").fetchone():
+            for i, (nombre, numero) in enumerate(CRITICOS_DEFAULT):
+                c.execute("INSERT INTO documentos_criticos (nombre, gcg_numero, paises, orden) VALUES (?,?,'AR',?)",
+                          (nombre, numero, i))
         for tabla, cols in COLUMNAS_NUEVAS.items():
             existentes = {r["name"] for r in c.execute(f"PRAGMA table_info({tabla})")}
             for col in cols:
