@@ -139,7 +139,7 @@ def info_chofer(dni):
     return {"dni": d, "bloqueos": b, "gcg": dict(g) if g else None}
 
 
-def alertas(patente, dni=None, en_vivo=True):
+def alertas(patente, dni=None, en_vivo=True, fresco=False, forzar_vivo=False):
     """[{nivel: bloqueo|aviso, texto}] para mostrarle al transporte y guardar en el disponible.
     Semáforo GCG de unidad y chofer: rojo bloquea, amarillo avisa (ver semaforo())."""
     hoy = db.hoy()
@@ -154,18 +154,18 @@ def alertas(patente, dni=None, en_vivo=True):
     for b in iu["bloqueos"]:
         out.append({"nivel": "bloqueo", "texto": f"Unidad bloqueada: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
     if patente:
-        out += _alertas_semaforo("unidad", patente, iu["gcg"], en_vivo)
+        out += _alertas_semaforo("unidad", patente, iu["gcg"], en_vivo, fresco, forzar_vivo)
     if dni:
         ic = info_chofer(dni)
         for b in ic["bloqueos"]:
             out.append({"nivel": "bloqueo", "texto": f"Chofer bloqueado: {b['motivo'] or 'sin motivo'} ({b['origen']})"})
-        out += _alertas_semaforo("chofer", dni, ic["gcg"], en_vivo)
+        out += _alertas_semaforo("chofer", dni, ic["gcg"], en_vivo, fresco, forzar_vivo)
     return out
 
 
-def _alertas_semaforo(tipo, clave, g, en_vivo):
+def _alertas_semaforo(tipo, clave, g, en_vivo, fresco=False, forzar_vivo=False):
     quien = "Chofer" if tipo == "chofer" else "Unidad"
-    sem = semaforo(tipo, clave, g, en_vivo)
+    sem = semaforo(tipo, clave, g, en_vivo, fresco, forzar_vivo)
     out = []
     if sem["color"] == "rojo":
         out.append({"nivel": "bloqueo", "texto": f"{quien} en ROJO: {sem['texto']}"})
@@ -181,14 +181,15 @@ def _alertas_semaforo(tipo, clave, g, en_vivo):
     return out
 
 
-def semaforo(tipo, clave, g=None, en_vivo=True):
+def semaforo(tipo, clave, g=None, en_vivo=True, fresco=False, forzar_vivo=False):
     """Semáforo de un chofer (DNI) o una unidad (dominio): en vivo contra la API de GCG si está configurada
     (con caché), si no —o si GCG no responde— desde el último exporte importado."""
     from . import gcg_api                      # import local: gcg_api usa este módulo
-    if en_vivo and gcg_api.en_carga():
-        r = gcg_api.consultar(tipo, clave)
+    if en_vivo and (gcg_api.activo() if forzar_vivo else gcg_api.en_carga()):
+        r = gcg_api.consultar(tipo, clave, usar_cache=not fresco)
         if r.get("ok"):
             return {**r["semaforo"], "proximos": r["proximos"], "criticos": r["criticos"], "otros_vencidos": [],
+                    "pendientes": r["pendientes"], "consultado": r.get("consultado"),
                     "fuente": "GCG en vivo" + (" (caché)" if r.get("cache") else "")}
     if g is None:
         g = (info_chofer(clave) if tipo == "chofer" else info_unidad(clave))["gcg"]
@@ -233,7 +234,7 @@ def semaforo_exporte(g, tipo="chofer", hoy=None):
     hoy = hoy or db.hoy()
     if not g:
         return {"color": "sin_dato", "texto": "no figura en GCG", "vencidos": [], "proximos": [], "criticos": [],
-                "otros_vencidos": [], "fuente": "sin dato"}
+                "otros_vencidos": [], "pendientes": [], "fuente": "sin dato"}
     docs = {_norm_doc(k): (k, v) for k, v in json.loads(g.get("documentos") or "{}").items()}
     habilitado = (g.get("estado") or "") == "HABILITADO"
     baja = "baja" in (g.get("situacion") or "").lower()
@@ -268,8 +269,13 @@ def semaforo_exporte(g, tipo="chofer", hoy=None):
         color, texto = "verde", "habilitado, críticos al día" if tipo == "chofer" else "habilitada, críticos al día"
     otros, _ = _docs_vencidos(json.dumps({k: v for k, v in json.loads(g.get("documentos") or "{}").items()
                                           if not _es_critico(k, tipo)}), hoy)
+    pendientes = [{"documento": d["documento"], "estado": d["estado"], "fecha": d["fecha"], "critico": True}
+                  for d in detalle if d["estado"] in ("vencido", "por vencer")]
+    pendientes += [{"documento": o.rsplit(" (", 1)[0], "estado": "vencido",
+                    "fecha": _fecha_iso(o.rsplit(" (", 1)[1].rstrip(")").replace("/", "-")) if " (" in o else None, "critico": False}
+                   for o in otros]
     return {"color": color, "texto": texto, "vencidos": vencidos, "proximos": proximos, "criticos": detalle,
-            "otros_vencidos": otros, "fuente": f"exporte de GCG del {(g.get('actualizado') or '')[:10]}"}
+            "otros_vencidos": otros, "pendientes": pendientes, "fuente": f"exporte de GCG del {(g.get('actualizado') or '')[:10]}"}
 
 
 def guardar_critico(datos, did=None):
@@ -347,12 +353,14 @@ def registrar_movimiento(t, b, informante="link"):
     ahora = db.ahora()
     gch = info_chofer(dni)["gcg"] if dni else None
     chofer_nombre = (gch or {}).get("nombre")
-    chofer_semaforo = semaforo("chofer", dni, gch)["color"] if dni and accion == "agrega" else None
-    unidad_semaforo = semaforo("unidad", patente)["color"] if accion == "agrega" else None
+    det = detalle_gcg(patente, dni, gch) if accion == "agrega" else {}
+    chofer_semaforo = (det.get("chofer") or {}).get("color")
+    unidad_semaforo = (det.get("unidad") or {}).get("color")
     fila = {"creado": ahora.isoformat(timespec="microseconds"), "fecha": ahora.date().isoformat(),
             "hora": ahora.strftime("%H:%M"), "transporte_id": t["id"], "transporte": t["nombre"], "patente": patente,
             "tipo": tipo, "pallets": pallets or None, "accion": accion, "eta": eta, "chofer_dni": dni,
-            "chofer_nombre": chofer_nombre, "chofer_semaforo": chofer_semaforo, "unidad_semaforo": unidad_semaforo, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
+            "chofer_nombre": chofer_nombre, "chofer_semaforo": chofer_semaforo, "unidad_semaforo": unidad_semaforo,
+            "gcg_detalle": json.dumps(det, ensure_ascii=False) if det else None, "gcg_consultado": db.ahora_iso() if det else None, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
             "bloqueado": 1 if bloq else 0, "bloqueo_motivo": " · ".join(bloq)[:500],
             "avisos": " · ".join(a["texto"] for a in al if a["nivel"] != "bloqueo")[:800]}
     with closing(db.con()) as c, c:
@@ -363,6 +371,42 @@ def registrar_movimiento(t, b, informante="link"):
         webhooks.enviar("alerta_bloqueo", {"transporte": t["nombre"], "patente": patente, "chofer_dni": dni,
                                            "motivos": bloq, "movimiento_id": fila["id"]})
     return fila, al
+
+
+def detalle_gcg(patente, dni=None, gch=None, fresco=False, forzar_vivo=False):
+    """Semáforo + pendientes de la unidad y del chofer (lo que se le muestra al proveedor y va a la columna GCG)."""
+    out = {}
+    for tipo, clave, g in (("unidad", patente, None), ("chofer", dni, gch)):
+        if not clave:
+            continue
+        s = semaforo(tipo, clave, g, True, fresco, forzar_vivo)
+        out[tipo] = {"color": s["color"], "texto": s["texto"], "fuente": s.get("fuente"), "pendientes": s.get("pendientes", [])}
+    return out
+
+
+def reconsultar_gcg(mov_id, transporte_id=None, por=""):
+    """Vuelve a consultar GCG (sin caché) para una unidad ya cargada: actualiza semáforos, pendientes y el bloqueo."""
+    with closing(db.con()) as c:
+        m = c.execute("SELECT * FROM movimientos WHERE id=?", (mov_id,)).fetchone()
+    if not m or (transporte_id and m["transporte_id"] != transporte_id):
+        raise Error("No existe esa carga.")
+    m = dict(m)
+    if m["accion"] != "agrega":
+        raise Error("Solo se reconsultan unidades cargadas.")
+    det = detalle_gcg(m["patente"], m["chofer_dni"], None, fresco=True, forzar_vivo=True)
+    al = alertas(m["patente"], m["chofer_dni"], en_vivo=True, forzar_vivo=True)   # usa la respuesta recién guardada
+    bloq = [a["texto"] for a in al if a["nivel"] == "bloqueo"]
+    antes = m["bloqueado"]
+    with closing(db.con()) as c, c:
+        c.execute("""UPDATE movimientos SET unidad_semaforo=?, chofer_semaforo=?, gcg_detalle=?, gcg_consultado=?, bloqueado=?,
+                     bloqueo_motivo=?, avisos=? WHERE id=?""",
+                  ((det.get("unidad") or {}).get("color"), (det.get("chofer") or {}).get("color"), json.dumps(det, ensure_ascii=False),
+                   db.ahora_iso(), 1 if bloq else 0, " · ".join(bloq)[:500],
+                   " · ".join(a["texto"] for a in al if a["nivel"] != "bloqueo")[:800], mov_id))
+    res = {"movimiento_id": mov_id, "patente": m["patente"], "transporte": m["transporte"], "gcg": det,
+           "bloqueado": 1 if bloq else 0, "se_desbloqueo": bool(antes and not bloq), "alertas": al, "por": por}
+    webhooks.enviar("gcg_reconsulta", res)
+    return res
 
 
 # ------------------------------------------------------------------ estado del día
@@ -394,6 +438,8 @@ def estado_dia(fecha=None, transporte_id=None):
                       "tipo": m["tipo"], "pallets": m["pallets"] or 0, "eta": m["eta"], "hora": m["hora"],
                       "chofer_dni": m["chofer_dni"], "chofer_nombre": m["chofer_nombre"],
                       "chofer_semaforo": m.get("chofer_semaforo"), "unidad_semaforo": m.get("unidad_semaforo"),
+                      "gcg": json.loads(m["gcg_detalle"]) if m.get("gcg_detalle") else None,
+                      "gcg_consultado": m.get("gcg_consultado"),
                       "comentario": m["comentario"],
                       "bloqueado": m["bloqueado"], "bloqueo_motivo": m["bloqueo_motivo"], "movimiento_id": m["id"],
                       "uso": s["uso"]})

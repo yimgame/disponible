@@ -16,7 +16,7 @@
   {% endif %}
   <p>Cada evento llega por <b>POST</b> con este formato:</p>
   <pre>{
-  "evento": "movimiento" | "alerta_bloqueo" | "uso" | "uso_anulado" | "prueba",
+  "evento": "movimiento" | "alerta_bloqueo" | "gcg_reconsulta" | "uso" | "uso_anulado" | "prueba",
   "enviado": "2026-11-19T10:15:00-03:00",
   "datos": { ... }   // el movimiento (con "alertas"), el uso, etc.
 }</pre>
@@ -44,6 +44,7 @@
       <tr><td class="pat">GET /api/v1/unidad/{patente}</td><td>Maestro de la unidad, GCG, bloqueos y alertas.</td></tr>
       <tr><td class="pat">GET /api/v1/chofer/{dni}</td><td>GCG del chofer, bloqueos y alertas.</td></tr>
       <tr><td class="pat">POST /api/v1/movimientos</td><td>Cargar o sacar una unidad: <code>{transporte_id, patente, accion: "agrega"|"quita", tipo: "refri"|"seco", pallets, eta, chofer_dni, comentario}</code>.</td></tr>
+      <tr><td class="pat">POST /api/v1/movimientos/{id}/gcg</td><td>Volver a consultar GCG para una unidad cargada (actualiza pendientes y levanta el bloqueo si ya está en orden).</td></tr>
       <tr><td class="pat">POST /api/v1/usos</td><td>Usar una unidad: <code>{patente, destino, viaje, planta, detalle, fecha}</code>.</td></tr>
       <tr><td class="pat">GET /api/v1/usos?desde=&amp;hasta=&amp;transporte_id=</td><td>Usos de un rango (dónde se usó cada unidad).</td></tr>
     </tbody></table></div>

@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS bases (
 """
 
 # Columnas agregadas después de la primera versión (la base se migra sola).
-COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT", "chofer_semaforo TEXT", "unidad_semaforo TEXT"],
+COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT", "chofer_semaforo TEXT", "unidad_semaforo TEXT", "gcg_detalle TEXT", "gcg_consultado TEXT"],
                    "gcg": ["pais TEXT", "situacion TEXT"],
                    "documentos_criticos": ["aplica_a TEXT NOT NULL DEFAULT 'chofer'"]}
 

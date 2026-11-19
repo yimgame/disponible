@@ -240,6 +240,17 @@ async def api_usar(req: Request):
         return _err(e)
 
 
+@app.post(PREFIJO + "/api/movimientos/{mid}/gcg")
+def api_reconsultar_gcg(req: Request, mid: int):
+    """El analista vuelve a consultar GCG para una unidad cargada (después de que el proveedor actualizó documentos)."""
+    _mismo_origen(req)
+    u = _requiere(req, "gestion")
+    try:
+        return {"ok": True, **logica.reconsultar_gcg(mid, por=u["usuario"])}
+    except logica.Error as e:
+        return _err(e)
+
+
 @app.post(PREFIJO + "/api/usos/{uid}/anular")
 def api_anular(req: Request, uid: int):
     _mismo_origen(req)
@@ -437,7 +448,7 @@ def gcg_pagina(req: Request, msg: str = "", error: str = ""):
     k = gcg_api.api_key()
     inf = secretos.info("gcg_api_key") or {}
     return plantillas.TemplateResponse(req, "gcg.html", {
-        "u": u, "msg": msg, "error": error, "criticos": logica.criticos(solo_activos=False),
+        "u": u, "msg": msg, "error": error, "criticos": logica.criticos(solo_activos=False), "catalogo": gcg_api.CATALOGO,
         "clave": {"cargada": bool(k), "final": k[-4:] if k else "", "desde_env": bool(k) and not secretos.get_secreto("gcg_api_key"),
                   "actualizado": inf.get("actualizado"), "por": inf.get("por")},
         "vivo_en_carga": secretos.get("gcg_vivo_en_carga", "1") == "1", "cache_horas": gcg_api.cache_horas(),
@@ -589,6 +600,17 @@ def publico_alertas(token: str, patente: str = "", dni: str = ""):
             "unidad": {k: u[k] for k in ("tipo", "pallets")} if u else None}
 
 
+@app.post(PREFIJO + "/publico/t/{token}/gcg/{mid}")
+def publico_reconsultar(token: str, mid: int):
+    """El proveedor avisa que ya actualizó los documentos: se vuelve a consultar GCG para esa unidad."""
+    t = _transporte_token(token)
+    try:
+        r = logica.reconsultar_gcg(mid, transporte_id=t["id"], por="transporte")
+    except logica.Error as e:
+        return _err(e)
+    return {**_mio(t), "reconsulta": r}
+
+
 @app.post(PREFIJO + "/publico/t/{token}/movimiento")
 async def publico_movimiento(token: str, req: Request):
     t = _transporte_token(token)
@@ -643,6 +665,15 @@ async def ag_movimiento(req: Request):
     except logica.Error as e:
         return _err(e)
     return {"ok": True, "movimiento": fila, "alertas": al}
+
+
+@app.post("/api/v1/movimientos/{mid}/gcg")
+def ag_reconsultar(req: Request, mid: int):
+    _agente(req)
+    try:
+        return {"ok": True, **logica.reconsultar_gcg(mid, por="agente")}
+    except logica.Error as e:
+        return _err(e)
 
 
 @app.post("/api/v1/usos")

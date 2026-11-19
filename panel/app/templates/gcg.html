@@ -73,8 +73,9 @@
     sin ellos, una unidad solo puede quedar en verde (habilitada) o amarillo (no habilitada). Agregá los que bloquean (ej. VTV, seguro) con su Nº GCG.</p>{% endif %}
   <form method="post" action="{{ P }}/criticos" class="filtros" style="margin-top:.6rem">
     <label>Se controla a <select name="aplica_a"><option value="chofer">Chofer</option><option value="unidad">Unidad</option></select></label>
-    <label style="flex:1 1 16rem">Nuevo documento crítico <input name="nombre" required maxlength="120" placeholder="tal como figura en GCG"></label>
-    <label>Nº GCG <input name="gcg_numero" size="4"></label><label>Países <input name="paises" value="AR" size="8"></label>
+    <label style="flex:1 1 16rem">Nuevo documento crítico <input name="nombre" id="n-doc" required maxlength="120" list="catalogo-gcg" autocomplete="off" placeholder="elegí del catálogo de GCG o escribí el nombre"></label>
+    <datalist id="catalogo-gcg">{% for num, nom in catalogo.items() %}<option value="{{ nom }}">Nº {{ num }}</option>{% endfor %}</datalist>
+    <label>Nº GCG <input name="gcg_numero" id="n-num" size="4"></label><label>Países <input name="paises" value="AR" size="8"></label>
     <button class="pri">Agregar</button>
   </form>
 </section>
@@ -95,6 +96,9 @@
 
 <script>
 const P = "{{ P }}";
+const CATALOGO = {{ catalogo | tojson }};
+document.getElementById("n-doc").addEventListener("change", (e) => {
+  const n = Object.entries(CATALOGO).find(([, nom]) => nom === e.target.value); if (n) document.getElementById("n-num").value = n[0]; });
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const CHIP = { verde: '<span class="chip ok">🟢 Verde</span>', amarillo: '<span class="chip warn">🟡 Amarillo</span>', rojo: '<span class="chip bad">🔴 Rojo</span>' };

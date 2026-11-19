@@ -52,11 +52,12 @@
     <h2 id="h-uni">Unidades del día</h2>
     <div class="filtros" style="margin-bottom:.6rem">
       <label>Ver <select id="f-est"><option value="">Disponibles y asignadas</option><option value="disponible">Solo las que quedan</option>
-        <option value="usada">Solo las asignadas</option><option value="bloq">Solo bloqueadas</option></select></label>
+        <option value="usada">Solo las asignadas</option><option value="bloq">Solo bloqueadas</option>
+        <option value="gcg">Con pendientes de GCG</option></select></label>
       <label>Buscar <input id="f-q" type="search" placeholder="Patente, chofer…"></label>
     </div>
     <div class="tabla"><table>
-      <thead><tr><th>Patente</th><th>Transporte</th><th>Tipo</th><th class="n">Pallets</th><th>ETA</th><th>Chofer</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Patente</th><th>Transporte</th><th>Tipo</th><th class="n">Pallets</th><th>ETA</th><th>Chofer</th><th>GCG</th><th>Estado</th><th></th></tr></thead>
       <tbody id="t-uni"></tbody>
     </table></div>
   </section>
@@ -112,7 +113,20 @@
 
 <script>
 const P = "{{ P }}", GESTION = {{ 'true' if gestion else 'false' }};
-const SEMA = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };   // semáforo documental del chofer (GCG)
+const SEMA = { verde: '🟢', amarillo: '🟡', rojo: '🔴' };   // semáforo documental (GCG)
+const ESTG = { vencido: 'vencido', falta: 'falta', 'por vencer': 'por vencer' };
+const conPendientes = (g) => g && ['unidad', 'chofer'].some((k) => g[k] && (g[k].pendientes || []).length);
+// Columna GCG: semáforo y documentos para actualizar de la unidad y del chofer
+function gcgCelda(f) {
+  const g = f.gcg;
+  if (!g) return '<span class="vacio">—</span>';
+  const partes = ['unidad', 'chofer'].filter((k) => g[k]).map((k) => {
+    const x = g[k], p = x.pendientes || [];
+    const lista = p.map((d) => `${esc(d.documento)} <b>${ESTG[d.estado] || esc(d.estado)}</b>${d.fecha ? ' ' + dmy(d.fecha).slice(0, 5) : ''}${d.critico ? ' ⛔' : ''}`).join('; ');
+    return `<div><b>${k === 'unidad' ? 'Unidad' : 'Chofer'}</b> ${SEMA[x.color] || '⚪'}${p.length ? ` <span class="suave">· ${lista}</span>` : x.color === 'sin_dato' ? ' <span class="suave">sin dato</span>' : ' <span class="suave">al día</span>'}</div>`;
+  });
+  return `<div class="gcg-celda">${partes.join('')}${f.gcg_consultado ? `<div class="suave">consultado ${esc(f.gcg_consultado.slice(11, 16))}</div>` : ''}</div>`;
+}
 const BASE_CARGA = location.origin + '/cargar';
 const TZ = 'America/Argentina/Buenos_Aires';
 const $ = id => document.getElementById(id);
@@ -199,18 +213,20 @@ function pintarUnidades() {
   if (!unDia) return;
   const dia = datos.dias.find(d => d.fecha === $('hasta').value);
   const fT = $('f-tte').value, est = $('f-est').value, q = $('f-q').value.trim().toLowerCase();
-  const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : f.estado === est)) &&
+  const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : est === 'gcg' ? conPendientes(f.gcg) : f.estado === est)) &&
     (!q || [f.patente, f.chofer_nombre, f.chofer_dni].join(' ').toLowerCase().includes(q)));
   $('h-uni').textContent = `Unidades del ${dmy($('hasta').value)} — ${filas.length}`;
   $('t-uni').innerHTML = filas.map(f => `<tr class="${f.estado}"><td class="pat">${SEMA[f.unidad_semaforo] ? SEMA[f.unidad_semaforo] + ' ' : ''}${esc(f.patente)}</td><td>${esc(f.transporte)}</td>
     <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
     <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
     <td>${f.chofer_dni ? `${SEMA[f.chofer_semaforo] || '⚪'} ` : ''}${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
+    <td style="min-width:14rem">${gcgCelda(f)}</td>
     <td>${f.estado === 'usada' ? `<span class="chip warn">Asignada</span><div class="suave">→ ${esc(f.uso.destino)}${f.uso.viaje ? ' · ' + esc(f.uso.viaje) : ''}</div>` : '<span class="chip ok">Disponible</span>'}
       ${f.bloqueado ? `<div class="bloq">⛔ ${esc(f.bloqueo_motivo)}</div>` : ''}${f.comentario ? `<div class="suave">“${esc(f.comentario)}”</div>` : ''}</td>
     <td>${GESTION ? `<div class="acc">${f.estado === 'disponible' ? `<button type="button" class="pri" data-usar="${esc(f.patente)}">Asignar</button>` :
-        `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular</button>`}</div>` : ''}</td></tr>`).join('')
-    || '<tr><td colspan="8" class="vacio">No hay unidades con ese filtro.</td></tr>';
+        `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular</button>`}
+        ${f.gcg ? `<button type="button" data-gcg="${f.movimiento_id}" title="Volver a consultar GCG (por si ya actualizaron documentos)">🔄 GCG</button>` : ''}</div>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="9" class="vacio">No hay unidades con ese filtro.</td></tr>';
 }
 
 function csv() {
@@ -248,6 +264,15 @@ async function anular(id) {
   const d = await r.json().catch(() => ({})); if (!r.ok || !d.ok) alert(d.error || 'No se pudo anular'); ver();
 }
 document.body.addEventListener('click', async e => {
+  const g = e.target.closest('[data-gcg]');
+  if (g) {
+    g.disabled = true; g.textContent = 'Consultando…';
+    const r = await fetch(`${P}/api/movimientos/${g.dataset.gcg}/gcg`, { method: 'POST', credentials: 'same-origin' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) alert(d.error || 'No se pudo consultar GCG');
+    else if (d.se_desbloqueo) alert(`✔ ${d.patente}: GCG ya la da en orden, se levantó el bloqueo.`);
+    return ver();
+  }
   const u = e.target.closest('[data-usar]'); if (u) return abrirUso(u.dataset.usar);
   const a = e.target.closest('[data-anular]'); if (a) return anular(a.dataset.anular);
   const b = e.target.closest('[data-copiar]'); if (!b) return;

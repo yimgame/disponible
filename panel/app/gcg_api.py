@@ -20,6 +20,24 @@ from . import db, logica, secretos
 
 URL = "https://api.gcgevolution.com/interfaces/api/{api_key}/{recurso}/{clave}"
 RECURSO = {"chofer": "trabajador", "unidad": "vehiculo"}
+# Catálogo de tipos de documento de GCG (el mismo de la app de bloqueos): la API devuelve el número, no el nombre.
+CATALOGO = {1: "Licencia de conducir", 2: "Form. 931 y rec. de pago", 3: "Constancia de remuneración",
+            4: "LiNTI - Lic. Nac. Tpte. Inter.", 5: "Libreta sanitaria", 6: "Libre deuda sindical", 7: "Pago sindicato camionero",
+            8: "Libre deuda obra social", 9: "Planilla de kilometraje", 10: "Ticket dpto. bancario haberes",
+            11: "Inspección técnica vehicular", 12: "Póliza de seguro autom.", 14: "R.U.T.A. - Reg. único tte. aut.",
+            15: "Seguimiento satelital", 16: "Formulario alta y medidas", 17: "SENASA", 18: "SEDRONAR", 20: "Sustancias alimenticias",
+            21: "Título del automotor", 22: "Cuota de seguro autom.", 23: "Tarjeta verde", 24: "Dec. jurada de titu. dominial",
+            25: "Doc legal impositiva tpte.", 40: "Certificado cobertura ART", 41: "Pago federación camioneros",
+            42: "Póliza accid. personales", 43: "Alta temprana del AFIP", 45: "Cuota accid. personales", 46: "Pago a subcontratista",
+            47: "Curso CNRT", 48: "Aguinaldo", 49: "Curso cap. 1 seg. tpte. cargas", 50: "Permiso internac. Uruguay",
+            60: "Permiso internac. Brasil", 70: "Permiso internac. Paraguay", 80: "Permiso internac. Bolivia",
+            90: "Permiso internac. Chile", 91: "Curso cap. 2 accidente cero", 92: "Curso cap. 3 prev. acc. viales",
+            97: "Carta adhesión", 98: "Carta oferta", 99: "Activo / inactivo"}
+
+
+def nombre_doc(codigo):
+    c = str(codigo or "").strip()
+    return CATALOGO.get(int(c), c) if c.isdigit() else c
 SITUACION_BAJA = 3
 
 
@@ -127,9 +145,16 @@ def evaluar(data, tipo="chofer"):
         sem = {"color": "amarillo", "texto": f"no {'habilitado' if tipo == 'chofer' else 'habilitada'} en GCG (sin críticos vencidos)"}
     else:
         sem = {"color": "verde", "texto": f"{'habilitado' if tipo == 'chofer' else 'habilitada'}, críticos al día"}
-    docs = sorted(({"numero": x.get("nombre"), "estado": bool(x.get("estado")), "fecha": _fecha_iso(x.get("fechaVto"))}
-                   for x in (data.get("documentos") or [])), key=lambda x: str(x["numero"]))
+    docs = sorted(({"numero": x.get("nombre"), "documento": nombre_doc(x.get("nombre")), "estado": bool(x.get("estado")),
+                    "fecha": _fecha_iso(x.get("fechaVto"))} for x in (data.get("documentos") or [])), key=lambda x: str(x["numero"]))
+    # Pendientes: lo que hay que actualizar (críticos vencidos / faltantes / por vencer, y el resto de vencidos)
+    criticos_nums = {str(int(c["gcg_numero"])) for c in logica.criticos(tipo=tipo) if c["gcg_numero"]}
+    pendientes = [{"documento": c["documento"], "estado": c["estado"], "fecha": c["fecha"], "critico": True}
+                  for c in criticos if c["estado"] in ("vencido", "falta", "por vencer")]
+    pendientes += [{"documento": d["documento"], "estado": "vencido", "fecha": d["fecha"], "critico": False} for d in docs
+                   if not d["estado"] and (str(d["numero"] or "").strip().lstrip("0") or "0") not in criticos_nums]
     nombre = (" ".join(str(data.get(k) or "") for k in ("apellido", "nombre")).strip() or data.get("nombreCompleto")
               or data.get("dominio") or data.get("descripcion"))
     return {"semaforo": {**sem, "fuente": "GCG en vivo"}, "criticos": criticos, "proximos": proximos, "documentos": docs,
+            "pendientes": pendientes,
             "nombre": nombre, "pais": iso, "habilitado": habilitado, "baja": baja, "quien": quien}

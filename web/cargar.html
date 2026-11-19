@@ -56,6 +56,15 @@
   .dos { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
   li.usada { opacity: .65; } li .usado { font-size: .8rem; font-weight: 700; color: var(--muted); }
   .hint { font-weight: 400; color: var(--muted); font-size: .8rem; }
+  .gcg { font-size: .85rem; margin-top: .3rem; display: grid; gap: .25rem; }
+  .gcg .fila { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
+  .gcg ul { list-style: disc; padding-left: 1.2rem; display: block; margin: 0; }
+  .gcg li { display: list-item; background: none; padding: 0; margin: .1rem 0; }
+  .sem { font-weight: 800; } .sem.rojo { color: var(--bad); } .sem.amarillo { color: var(--warn); } .sem.verde { color: var(--accent); }
+  li.carga { display: grid; grid-template-columns: 1fr; gap: .3rem; }
+  li.carga .top { display: flex; align-items: center; gap: .6rem; }
+  .btn-gcg { border: 1px solid var(--line) !important; background: var(--card) !important; color: var(--fg) !important; font-size: .8rem; padding: .35rem .6rem !important; }
+  #resultado-gcg { border-left: 4px solid var(--warn); }
   #msg { padding: .8rem; border-radius: 10px; font-weight: 600; }
   #msg.ok { background: var(--ok-bg); } #msg.err { background: var(--bad-bg); color: var(--bad); }
   .vacio { color: var(--muted); margin: 0; }
@@ -102,6 +111,7 @@
     </div>
   </section>
 
+  <section class="card" id="resultado-gcg" hidden></section>
   <section class="card" id="hoy" hidden>
     <h2>Tu disponible de hoy</h2>
     <div class="resumen">
@@ -124,6 +134,19 @@ function aviso(texto, ok) { const m = $('msg'); m.textContent = texto; m.classNa
 function setTipo(v) { tipo = v; document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
 const norm = p => p.replace(/[\s.\-]/g, '').toUpperCase();
 const fh = iso => iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)} ${iso.slice(11, 16)}` : '';
+const SEM = { verde: '🟢 Verde', amarillo: '🟡 Amarillo', rojo: '🔴 Rojo' };
+const EST = { vencido: 'vencido', falta: 'falta cargar', 'por vencer': 'por vencer' };
+// Qué le falta en GCG (unidad y chofer): lo que tiene que actualizar el transporte.
+function gcgHtml(g, completo) {
+  if (!g) return '';
+  return '<div class="gcg">' + ['unidad', 'chofer'].filter(k => g[k] && g[k].color !== 'sin_dato').map(k => {
+    const x = g[k], pend = x.pendientes || [];
+    const lista = pend.length ? '<ul>' + pend.map(p => `<li>${esc(p.documento)} — <b>${EST[p.estado] || esc(p.estado)}</b>${p.fecha ? ' (' + fh(p.fecha + 'T00:00').slice(0, 5) + '/' + p.fecha.slice(0, 4) + ')' : ''}${p.critico ? ' · <b>bloquea</b>' : ''}</li>`).join('') + '</ul>' : '';
+    return `<div><div class="fila"><span>${k === 'unidad' ? 'Unidad' : 'Chofer'}:</span><span class="sem ${x.color}">${SEM[x.color] || ''}</span>` +
+      `${pend.length ? `<span class="hint">${pend.length} documento(s) para actualizar</span>` : '<span class="hint">sin pendientes</span>'}</div>` +
+      (completo || x.color !== 'verde' ? lista : '') + '</div>';
+  }).join('') + '</div>';
+}
 function ahoraLocal(min = 0) { const d = new Date(Date.now() + min * 60000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
 
 function pintar(d) {
@@ -143,9 +166,12 @@ function pintar(d) {
     $('cuota').textContent = f ? `Cuota del día: ${cargadas} de ${d.cuota} — faltan ${f}` : `Cuota del día cumplida: ${cargadas} de ${d.cuota} ✔`; }
   $('lista').innerHTML = d.filas.length ? d.filas.map(a => a.estado === 'usada'
       ? `<li class="usada"><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span><span class="det">${a.pallets} pl</span><span class="usado">✔ ya se usó</span></li>`
-      : `<li><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span>
+      : `<li class="carga"><div class="top"><span class="pat">${esc(a.patente)}</span><span class="tag ${a.tipo}">${a.tipo}</span>
          <span class="det">${a.pallets} pl${a.eta ? ' · llega ' + fh(a.eta) : ''}${a.bloqueado ? ' · ⛔ bloqueada' : ''}</span>
-         <button type="button" data-sacar="${esc(a.patente)}" data-tipo="${a.tipo}" data-pallets="${a.pallets}">Sacar</button></li>`).join('')
+         <button type="button" data-sacar="${esc(a.patente)}" data-tipo="${a.tipo}" data-pallets="${a.pallets}">Sacar</button></div>
+         ${gcgHtml(a.gcg)}
+         ${a.gcg && ['unidad', 'chofer'].some(k => a.gcg[k] && a.gcg[k].color !== 'verde' && a.gcg[k].color !== 'sin_dato')
+           ? `<div><button type="button" class="btn-gcg" data-gcg="${a.movimiento_id}">🔄 Ya actualicé los documentos: volver a consultar GCG</button></div>` : ''}</li>`).join('')
     : '<li class="vacio">Todavía no informaste unidades hoy.</li>';
   $('form').hidden = false; $('hoy').hidden = false;
 }
@@ -184,6 +210,13 @@ async function enviar(accion, item) {
     const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.error || 'No se pudo guardar');
     const bloq = (d.alertas || []).some(a => a.nivel === 'bloqueo');
     aviso((accion === 'agrega' ? (bloq ? '⛔ Cargada como BLOQUEADA: ' : '✔ Disponible: ') : '✖ Sacada: ') + item.patente, !bloq);
+    const cargada = accion === 'agrega' ? d.filas.find(f => f.patente === item.patente) : null;
+    const caja = $('resultado-gcg');
+    if (cargada && cargada.gcg && Object.values(cargada.gcg).some(x => x.color !== 'verde' && x.color !== 'sin_dato')) {
+      caja.innerHTML = `<h2>GCG — ${esc(item.patente)}: lo que tenés que actualizar</h2>${gcgHtml(cargada.gcg, true)}` +
+        `<p class="hint">Actualizalo en GCG y después tocá «🔄 volver a consultar» en la unidad, abajo. ${bloq ? 'Mientras tanto la unidad figura bloqueada.' : ''}</p>`;
+      caja.hidden = false; caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else { caja.hidden = true; }
     $('patente').value = ''; $('pallets').value = ''; $('comentario').value = ''; $('chofer').value = ''; mostrarAlertas([]); setTipo(''); pintar(d);
   } catch (e) { aviso(e.message, false); } finally { btns.forEach(b => b.disabled = false); }
 }
@@ -205,7 +238,21 @@ $('chofer').addEventListener('input', revisar);
 document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setTipo(b.dataset.v)));
 $('btn-si').addEventListener('click', () => { const i = leerForm('agrega'); if (i) enviar('agrega', i); });
 $('btn-no').addEventListener('click', () => { const i = leerForm('quita'); if (i) enviar('quita', i); });
-$('lista').addEventListener('click', e => { const b = e.target.closest('[data-sacar]'); if (!b) return;
+$('lista').addEventListener('click', async e => {
+  const g = e.target.closest('[data-gcg]');
+  if (g) {
+    g.disabled = true; g.textContent = 'Consultando GCG…';
+    try {
+      const r = await fetch(`${API}/gcg/${g.dataset.gcg}`, { method: 'POST' }); const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || 'No se pudo consultar');
+      const rc = d.reconsulta;
+      aviso(rc.se_desbloqueo ? `✔ ${rc.patente}: GCG ya la da en orden, se levantó el bloqueo` :
+            rc.bloqueado ? `⛔ ${rc.patente}: GCG todavía marca documentos pendientes` : `✔ ${rc.patente}: consultada de nuevo`, !rc.bloqueado);
+      $('resultado-gcg').hidden = true; pintar(d);
+    } catch (err) { aviso(err.message, false); g.disabled = false; g.textContent = '🔄 Volver a consultar GCG'; }
+    return;
+  }
+  const b = e.target.closest('[data-sacar]'); if (!b) return;
   if (confirm('¿Sacar ' + b.dataset.sacar + ' del disponible?')) enviar('quita', { patente: b.dataset.sacar }); });
 $('eta').min = ahoraLocal(-24 * 60); $('eta').value = ahoraLocal(60);
 cargar();

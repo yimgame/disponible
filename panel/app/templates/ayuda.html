@@ -47,6 +47,16 @@
   <details><summary>Reporte</summary><p><b>Bajar reporte</b> baja un Excel (CSV) con los indicadores, el ranking, las causas con su detalle y las bases.
     <b>Imprimir / PDF</b> imprime la pantalla (o la guarda como PDF).</p></details>
 </section>
+<section class="card"><h2>🔁 Circuito de control GCG</h2>
+  <details open><summary>Cómo funciona, de punta a punta</summary><ol>
+    <li><b>El proveedor carga</b> la unidad (y el DNI del chofer) en su link: se consulta GCG en vivo (unidad por dominio, chofer por DNI).</li>
+    <li><b>Se le informa en el momento qué le falta</b>: cada documento vencido, faltante o por vencer, de la unidad y del chofer, y cuáles bloquean.
+      Si algo crítico está vencido la unidad queda <b>bloqueada</b> en el disponible.</li>
+    <li><b>En el panel</b>, la columna <b>GCG</b> de «Unidades del día» muestra lo mismo (filtro «Con pendientes de GCG»): el analista ya sabe qué gestionar.</li>
+    <li>Cuando el proveedor actualiza los documentos en GCG, toca <b>«🔄 Ya actualicé los documentos: volver a consultar GCG»</b> en su link
+      (o el analista <b>🔄 GCG</b> en el panel). Si GCG ya la da en orden, <b>se levanta el bloqueo solo</b>.</li>
+  </ol><p>Cada reconsulta también se avisa por el webhook (evento <code>gcg_reconsulta</code>) por si se quiere notificar con n8n.</p></details>
+</section>
 <section class="card"><h2>⛔ Bloqueos y documentos</h2>
   <details><summary>De dónde salen los bloqueos</summary><ul>
     <li><b>Maestro de unidades</b>: columna Bloqueado = Y (con el documento vencido).</li>
