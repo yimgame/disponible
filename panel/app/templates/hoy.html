@@ -25,7 +25,7 @@
     <div class="kpi"><b id="k-u">–</b><span id="k-u-l">unidades disponibles</span></div>
     <div class="kpi r"><b id="k-r">–</b><span>refri · <span id="k-rp">–</span> pallets</span></div>
     <div class="kpi s"><b id="k-s">–</b><span>seco · <span id="k-sp">–</span> pallets</span></div>
-    <div class="kpi u"><b id="k-us">–</b><span>usadas · se descuentan</span></div>
+    <div class="kpi u"><b id="k-us">–</b><span>asignadas · se descuentan</span></div>
     <div class="kpi b"><b id="k-b">–</b><span>bloqueadas en el disponible</span></div>
     <div class="kpi"><b id="k-mov">–</b><span>puestas <span class="agrega" id="k-put">–</span> · sacadas <span class="quita" id="k-sac">–</span></span></div>
   </section>
@@ -35,14 +35,14 @@
       <h2 id="h-tte">Por transporte</h2>
       <div class="tabla"><table>
         <thead><tr><th>Transporte</th><th class="n">Unid.</th><th class="n">Refri</th><th class="n">Seco</th><th class="n">Pallets</th>
-          <th class="n">Usadas</th><th class="n">Puso</th><th class="n">Sacó</th><th>Cuota</th><th></th></tr></thead>
+          <th class="n">Asign.</th><th class="n">Puso</th><th class="n">Sacó</th><th>Cuota</th><th></th></tr></thead>
         <tbody id="t-tte"></tbody>
       </table></div>
     </section>
     <section class="card">
       <h2>Por día</h2>
       <div class="tabla"><table>
-        <thead><tr><th>Fecha</th><th class="n">Unid.</th><th class="n">Refri u/pl</th><th class="n">Seco u/pl</th><th class="n">Usadas</th><th class="n">Puso</th><th class="n">Sacó</th></tr></thead>
+        <thead><tr><th>Fecha</th><th class="n">Unid.</th><th class="n">Refri u/pl</th><th class="n">Seco u/pl</th><th class="n">Asign.</th><th class="n">Puso</th><th class="n">Sacó</th></tr></thead>
         <tbody id="t-dia"></tbody>
       </table></div>
     </section>
@@ -51,8 +51,8 @@
   <section class="card" id="sec-unidades">
     <h2 id="h-uni">Unidades del día</h2>
     <div class="filtros" style="margin-bottom:.6rem">
-      <label>Ver <select id="f-est"><option value="">Disponibles y usadas</option><option value="disponible">Solo las que quedan</option>
-        <option value="usada">Solo las usadas</option><option value="bloq">Solo bloqueadas</option></select></label>
+      <label>Ver <select id="f-est"><option value="">Disponibles y asignadas</option><option value="disponible">Solo las que quedan</option>
+        <option value="usada">Solo las asignadas</option><option value="bloq">Solo bloqueadas</option></select></label>
       <label>Buscar <input id="f-q" type="search" placeholder="Patente, chofer…"></label>
     </div>
     <div class="tabla"><table>
@@ -62,10 +62,10 @@
   </section>
 
   <section class="card">
-    <div class="filtros" style="justify-content:space-between;margin-bottom:.4rem"><h2 style="margin:0">Usos <span class="suave">— dónde se usó cada unidad</span></h2>
-      <button type="button" id="btn-csv-usos" class="chico">Bajar usos CSV</button></div>
+    <div class="filtros" style="justify-content:space-between;margin-bottom:.4rem"><h2 style="margin:0">Asignaciones <span class="suave">— a qué base / carga fue cada unidad</span></h2>
+      <button type="button" id="btn-csv-usos" class="chico">Bajar asignaciones CSV</button></div>
     <div class="tabla"><table>
-      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th>Destino</th><th>Viaje / orden</th><th>Planta</th><th>Detalle</th><th>Quién</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th>Base / destino</th><th>Carga / viaje</th><th>Planta / origen</th><th>Detalle</th><th>Quién</th><th></th></tr></thead>
       <tbody id="t-usos"></tbody>
     </table></div>
   </section>
@@ -95,17 +95,18 @@
 
 <dialog id="d-usar">
   <form method="dialog" id="f-usar">
-    <h2 style="margin:0">Usar <span id="u-patente" class="pat"></span></h2>
+    <h2 style="margin:0">Asignar <span id="u-patente" class="pat"></span></h2>
     <p class="suave" id="u-info" style="margin:0"></p>
     <p class="error" id="u-bloq" hidden></p>
-    <label>Destino (dónde se usó)<input id="u-destino" required maxlength="120" placeholder="ej. CD Pilar, cliente X, Rosario"></label>
+    <label>Base / destino<input id="u-destino" required maxlength="120" list="lista-bases" autocomplete="off" placeholder="Elegí de la lista o escribí una nueva"></label>
+    <datalist id="lista-bases">{% for b in bases %}<option value="{{ b }}">{% endfor %}</datalist>
     <div class="dos-col">
-      <label>Viaje / orden<input id="u-viaje" maxlength="60" placeholder="ej. 4501234"></label>
+      <label>Carga / viaje<input id="u-viaje" maxlength="60" placeholder="ej. 4501234"></label>
       <label>Planta / origen<input id="u-planta" maxlength="80" placeholder="ej. Planta Arroyito"></label>
     </div>
     <label>Detalle<textarea id="u-detalle" rows="2" maxlength="300"></textarea></label>
     <p class="error" id="u-error" hidden></p>
-    <div class="rap"><button class="pri" value="ok">✔ Registrar uso</button><button value="cancelar" formnovalidate>Cancelar</button></div>
+    <div class="rap"><button class="pri" value="ok">✔ Asignar</button><button value="cancelar" formnovalidate>Cancelar</button></div>
   </form>
 </dialog>
 
@@ -184,7 +185,7 @@ function pintar() {
   $('t-usos').innerHTML = usos.map(x => `<tr class="${x.anulado ? 'apagado' : ''}"><td class="nw">${dmy(x.fecha)}</td><td>${esc(x.creado.slice(11, 16))}</td><td>${esc(x.transporte)}</td>
     <td class="pat">${esc(x.patente)}</td><td class="${x.tipo}">${esc(x.tipo)}</td><td><b>${esc(x.destino)}</b></td><td>${esc(x.viaje)}</td><td>${esc(x.planta)}</td>
     <td>${esc(x.detalle)}</td><td>${esc(x.usuario)}</td><td>${x.anulado ? `<span class="chip na">anulado</span>` : (GESTION ? `<div class="acc"><button type="button" data-anular="${x.id}">↩ Anular</button></div>` : '')}</td></tr>`).join('')
-    || '<tr><td colspan="11" class="vacio">Todavía no se usó ninguna unidad en estas fechas.</td></tr>';
+    || '<tr><td colspan="11" class="vacio">Todavía no se asignó ninguna unidad en estas fechas.</td></tr>';
   $('t-mov').innerHTML = [...movs].sort((a, b) => String(b.creado).localeCompare(String(a.creado))).map(m => `<tr><td class="nw">${dmy(m.fecha)}</td><td>${esc(m.hora)}</td><td>${esc(m.transporte)}</td>
     <td class="pat">${esc(m.patente)}${m.bloqueado ? ' <span class="chip bad" title="' + esc(m.bloqueo_motivo) + '">bloq.</span>' : ''}</td><td class="${m.tipo}">${esc(m.tipo)}</td><td class="n">${m.pallets ?? ''}</td>
     <td class="${m.accion}">${m.accion === 'quita' ? 'Sacó' : 'Puso'}</td><td class="nw">${fh(m.eta)}</td><td>${esc(m.chofer_nombre || m.chofer_dni)}</td><td>${esc(m.comentario)}</td></tr>`).join('')
@@ -204,10 +205,10 @@ function pintarUnidades() {
     <td class="${f.tipo}">${f.tipo === 'refri' ? 'Refri' : 'Seco'}</td><td class="n">${f.pallets}</td>
     <td class="nw">${f.eta ? fh(f.eta) : '<span class="vacio">—</span>'}<div class="suave">cargó ${esc(f.hora)}</div></td>
     <td>${esc(f.chofer_nombre || f.chofer_dni || '')}</td>
-    <td>${f.estado === 'usada' ? `<span class="chip warn">Usada</span><div class="suave">→ ${esc(f.uso.destino)}${f.uso.viaje ? ' · ' + esc(f.uso.viaje) : ''}</div>` : '<span class="chip ok">Disponible</span>'}
+    <td>${f.estado === 'usada' ? `<span class="chip warn">Asignada</span><div class="suave">→ ${esc(f.uso.destino)}${f.uso.viaje ? ' · ' + esc(f.uso.viaje) : ''}</div>` : '<span class="chip ok">Disponible</span>'}
       ${f.bloqueado ? `<div class="bloq">⛔ ${esc(f.bloqueo_motivo)}</div>` : ''}${f.comentario ? `<div class="suave">“${esc(f.comentario)}”</div>` : ''}</td>
-    <td>${GESTION ? `<div class="acc">${f.estado === 'disponible' ? `<button type="button" class="pri" data-usar="${esc(f.patente)}">Usar</button>` :
-        `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular uso</button>`}</div>` : ''}</td></tr>`).join('')
+    <td>${GESTION ? `<div class="acc">${f.estado === 'disponible' ? `<button type="button" class="pri" data-usar="${esc(f.patente)}">Asignar</button>` :
+        `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular</button>`}</div>` : ''}</td></tr>`).join('')
     || '<tr><td colspan="8" class="vacio">No hay unidades con ese filtro.</td></tr>';
 }
 
@@ -241,7 +242,7 @@ $('f-usar').addEventListener('submit', async e => {
   $('d-usar').close(); ver();
 });
 async function anular(id) {
-  if (!confirm('¿Anular este uso? La unidad vuelve a quedar disponible.')) return;
+  if (!confirm('¿Anular esta asignación? La unidad vuelve a quedar disponible.')) return;
   const r = await fetch(`${P}/api/usos/${id}/anular`, { method: 'POST', credentials: 'same-origin' });
   const d = await r.json().catch(() => ({})); if (!r.ok || !d.ok) alert(d.error || 'No se pudo anular'); ver();
 }

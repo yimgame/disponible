@@ -185,7 +185,8 @@ def hoy(req: Request):
     u = _requiere(req)
     if u["cambiar_clave"]:
         return RedirectResponse(PREFIJO + "/cuenta", 303)
-    return plantillas.TemplateResponse(req, "hoy.html", {"u": u, "hoy": db.hoy(), "maestro": logica.transportistas_del_maestro()})
+    return plantillas.TemplateResponse(req, "hoy.html", {"u": u, "hoy": db.hoy(), "maestro": logica.transportistas_del_maestro(),
+                                                         "bases": [b["nombre"] for b in logica.bases(solo_activas=True)]})
 
 
 @app.get(PREFIJO + "/api/estado")
@@ -296,7 +297,7 @@ def transportes_pagina(req: Request, msg: str = "", error: str = ""):
     u = _requiere(req)
     return plantillas.TemplateResponse(req, "transportes.html", {
         "u": u, "transportes": logica.transportes(), "maestro": logica.transportistas_del_maestro(),
-        "msg": msg, "error": error})
+        "bases": logica.bases(), "msg": msg, "error": error})
 
 
 @app.post(PREFIJO + "/transportes")
@@ -314,6 +315,88 @@ async def transportes_post(req: Request):
     except (logica.Error, ValueError) as e:
         return RedirectResponse(f"{PREFIJO}/transportes?error={quote(str(e))}", 303)
     return RedirectResponse(f"{PREFIJO}/transportes?msg={quote(msg)}", 303)
+
+
+@app.post(PREFIJO + "/transportes/generar")
+async def transportes_generar(req: Request):
+    _mismo_origen(req)
+    _requiere(req, "gestion")
+    b = await req.json()
+    return {"ok": True, **logica.generar_transportes_maestro(max(1, _int(b.get("min_unidades")) or 1),
+                                                           b.get("simular", True) is not False)}
+
+
+@app.post(PREFIJO + "/bases")
+async def bases_post(req: Request):
+    _mismo_origen(req)
+    _requiere(req, "gestion")
+    f = {k: str(v) for k, v in (await req.form()).items()}
+    try:
+        logica.guardar_base(f.get("nombre"), f.get("tipo"), f.get("activo", "1") == "1", _int(f.get("id")))
+        msg = "Base guardada."
+    except logica.Error as e:
+        return RedirectResponse(f"{PREFIJO}/transportes?error={quote(str(e))}#bases", 303)
+    return RedirectResponse(f"{PREFIJO}/transportes?msg={quote(msg)}#bases", 303)
+
+
+# ------------------------------------------------------------------ análisis de rendimiento (gráficos + Ishikawa)
+@app.get(PREFIJO + "/analisis", response_class=HTMLResponse)
+def analisis_pagina(req: Request):
+    u = _requiere(req)
+    return plantillas.TemplateResponse(req, "analisis.html", {"u": u, "hoy": db.hoy(),
+                                                               "transportes": logica.transportes()})
+
+
+@app.get(PREFIJO + "/api/analisis")
+def api_analisis(req: Request, desde: str = "", hasta: str = "", transporte: str = ""):
+    _requiere(req)
+    d, h = _rango(desde, hasta)
+    try:
+        return logica.analisis(d, h, _int(transporte))
+    except logica.Error as e:
+        return _err(e)
+
+
+@app.get(PREFIJO + "/analisis.csv")
+def analisis_csv(req: Request, desde: str = "", hasta: str = "", transporte: str = ""):
+    """Reporte de rendimiento: resumen, ranking de transportes, causas (Ishikawa) y su detalle."""
+    _requiere(req)
+    d, h = _rango(desde, hasta)
+    a = logica.analisis(d, h, _int(transporte))
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    k = a["kpis"]
+    w.writerow(["Reporte de rendimiento del disponible", f"{d} a {h}", f"{a['dias']} días con movimientos"])
+    w.writerow([])
+    w.writerow(["Cargadas", "Asignadas", "Meta (cuota x días)", "Cumplimiento %", "Uso %", "Bloqueadas", "Bloqueadas %",
+                "Anticipación ETA mediana (h)", "Con chofer %"])
+    w.writerow([k["cargadas"], k["asignadas"], k["meta"], k["cumplimiento"], k["uso"], k["bloqueadas"], k["pct_bloq"],
+                k["anticipacion_mediana"], k["pct_chofer"]])
+    w.writerow([])
+    w.writerow(["Transporte", "Cuota/día", "Meta", "Cargadas", "Cumplimiento %", "Asignadas", "Uso %", "Sin asignar",
+                "Bloqueadas", "Bloqueadas %", "Con ETA %", "Con chofer %", "Sacadas"])
+    for x in a["ranking"]:
+        w.writerow([x["transporte"], x["cuota"], x["meta"], x["cargadas"], x["cumplimiento"], x["asignadas"], x["uso"],
+                    x["ociosas"], x["bloqueadas"], x["pct_bloq"], x["pct_eta"], x["pct_chofer"], x["sacadas"]])
+    w.writerow([])
+    w.writerow(["Ishikawa — efecto:", a["efecto"]])
+    w.writerow(["Categoría", "Causa", "Casos"])
+    for cat in a["ishikawa"]:
+        for c in cat["causas"]:
+            w.writerow([cat["categoria"], c["texto"], c["cantidad"]])
+    w.writerow([])
+    w.writerow(["Detalle de causas"])
+    w.writerow(["Categoría", "Causa", "Fecha", "Transporte", "Patente", "Detalle"])
+    for cat in a["ishikawa"]:
+        for c in cat["causas"]:
+            for x in a["casos"][c["clave"]]:
+                w.writerow([cat["categoria"], c["texto"], x["fecha"], x["transporte"], x["patente"], x["detalle"]])
+    w.writerow([])
+    w.writerow(["Base / destino", "Asignadas", "Refri", "Seco", "Pallets"])
+    for b in a["bases"]:
+        w.writerow([b["base"], b["asignadas"], b["refri"], b["seco"], b["pallets"]])
+    return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="rendimiento-{d}-a-{h}.csv"'})
 
 
 # ------------------------------------------------------------------ consulta (unidad / chofer) y bloqueos

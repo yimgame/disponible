@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block titulo %}Análisis · Disponible{% endblock %}
+{% block contenido %}
+<header>
+  <h1>Análisis de rendimiento</h1>
+  <p class="sub">Cumplimiento de cuota, uso del disponible, bloqueos y sus causas (Ishikawa). <span id="estado"></span></p>
+</header>
+
+<section class="card no-imprimir">
+  <div class="filtros">
+    <label for="desde">Desde <input type="date" id="desde"></label>
+    <label for="hasta">Hasta <input type="date" id="hasta"></label>
+    <label for="f-tte">Transporte <select id="f-tte"><option value="">Todos</option>
+      {% for t in transportes %}<option value="{{ t.id }}">{{ t.nombre }}</option>{% endfor %}</select></label>
+    <div class="rap">
+      <button type="button" data-r="7">7 días</button><button type="button" data-r="30">30 días</button>
+      <button type="button" data-r="mes">Este mes</button><button type="button" data-r="ant">Mes anterior</button>
+    </div>
+    <button type="button" class="pri" id="btn-ver">Ver</button>
+    <button type="button" id="btn-csv">Bajar reporte</button>
+    <button type="button" id="btn-imp">Imprimir / PDF</button>
+  </div>
+</section>
+
+<p class="imprimir-solo" id="titulo-imp"></p>
+
+<section class="kpis" aria-label="Indicadores">
+  <div class="kpi"><b id="k-cump">–</b><span>cumplimiento de cuota<br><small id="k-cump-d"></small></span></div>
+  <div class="kpi"><b id="k-car">–</b><span>unidades cargadas<br><small id="k-car-d"></small></span></div>
+  <div class="kpi"><b id="k-uso">–</b><span>uso del disponible<br><small id="k-uso-d"></small></span></div>
+  <div class="kpi"><b id="k-bloq">–</b><span>cargadas bloqueadas<br><small id="k-bloq-d"></small></span></div>
+  <div class="kpi"><b id="k-eta">–</b><span>anticipación del ETA<br><small>mediana, entre que carga y llega</small></span></div>
+  <div class="kpi"><b id="k-cho">–</b><span>cargadas con chofer<br><small>informado por el transporte</small></span></div>
+</section>
+
+<div class="grid2">
+  <section class="card">
+    <h2>Cargadas y asignadas por día</h2>
+    <div class="graf"><canvas id="g-dias" aria-label="Unidades cargadas y asignadas por día, con la meta de cuota"></canvas></div>
+  </section>
+  <section class="card">
+    <h2>Cumplimiento de cuota por transporte</h2>
+    <div class="graf" id="graf-cump"><canvas id="g-cump" aria-label="Cumplimiento de cuota por transporte"></canvas></div>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Ishikawa — ¿por qué el disponible no se cumple o no es apto?</h2>
+  <p class="suave">Cada espina es una categoría de causas; el número es cuántas veces pasó en el período. Tocá una causa para ver los casos.</p>
+  <div class="tabla"><svg id="ishikawa" viewBox="0 0 1200 470" role="img" aria-label="Diagrama de Ishikawa de causas"></svg></div>
+  <div id="detalle" hidden>
+    <div class="filtros" style="justify-content:space-between"><h3 id="det-titulo" style="margin:.4rem 0"></h3><button type="button" class="chico" id="det-cerrar">Cerrar</button></div>
+    <div class="tabla"><table><thead><tr><th>Fecha</th><th>Transporte</th><th>Patente</th><th>Detalle</th></tr></thead><tbody id="det-filas"></tbody></table></div>
+  </div>
+</section>
+
+<div class="grid3">
+  <section class="card">
+    <h2>Asignaciones por base</h2>
+    <div class="graf"><canvas id="g-bases" aria-label="Unidades asignadas por base"></canvas></div>
+  </section>
+  <section class="card">
+    <h2>¿A qué hora cargan?</h2>
+    <div class="graf"><canvas id="g-horas" aria-label="Unidades cargadas por hora del día"></canvas></div>
+  </section>
+  <section class="card">
+    <h2>Anticipación del ETA</h2>
+    <div class="graf"><canvas id="g-eta" aria-label="Horas entre la carga y la llegada estimada"></canvas></div>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Ranking de transportes</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Transporte</th><th class="n">Cuota/día</th><th class="n">Cargadas / meta</th><th>Cumplimiento</th><th class="n">Asignadas</th>
+      <th class="n">Uso</th><th class="n">Bloqueadas</th><th class="n">Con ETA</th><th class="n">Con chofer</th><th class="n">Sacadas</th></tr></thead>
+    <tbody id="t-rank"></tbody>
+  </table></div>
+</section>
+
+<style>
+.graf { position: relative; height: 280px; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
+.kpi small { color: var(--muted); font-size: .75rem; }
+#ishikawa { width: 100%; min-width: 760px; height: auto; display: block; }
+#ishikawa .espina { stroke: var(--muted); stroke-width: 2; fill: none; }
+#ishikawa .hueso { stroke: var(--line); stroke-width: 2; }
+#ishikawa .cat { font: 700 15px var(--sans); fill: var(--fg); }
+#ishikawa .causa { font: 12px var(--sans); fill: var(--muted); cursor: pointer; }
+#ishikawa .causa.hay { fill: var(--fg); font-weight: 600; }
+#ishikawa .causa:hover, #ishikawa .causa:focus { fill: var(--accent); outline: none; text-decoration: underline; }
+#ishikawa .num { font: 700 12px var(--sans); }
+#ishikawa .marca-top { fill: var(--bad); }
+#ishikawa .efecto rect { fill: var(--bad-bg); stroke: var(--bad); stroke-width: 1.5; }
+#ishikawa .efecto text { font: 700 15px var(--sans); fill: var(--bad); }
+.imprimir-solo { display: none; }
+@media print {
+  .barra, .no-imprimir, #detalle { display: none !important; }
+  .imprimir-solo { display: block; font-weight: 700; }
+  body { background: #fff; }
+  .card, .kpi { break-inside: avoid; }
+}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const P = "{{ P }}", TZ = "America/Argentina/Buenos_Aires";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fechaAR = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d);
+const sumarDias = (f, n) => { const d = new Date(f + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const dmy = (f) => (f ? f.split("-").reverse().join("/") : "");
+const pct = (v) => (v === null || v === undefined ? "—" : v + "%");
+let datos = null, graficos = {};
+
+// Colores de los gráficos (validados para daltonismo en claro y oscuro): cargadas = violeta, asignadas = naranja.
+function colores() {
+  const oscuro = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().toLowerCase() === "#111513";
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  return { cargadas: oscuro ? "#9085e9" : "#6250d6", asignadas: oscuro ? "#d95926" : "#eb6834",
+           ok: css("--ok"), warn: css("--warn"), bad: css("--bad"), fg: css("--fg"), muted: css("--muted"), line: css("--line"), card: css("--card") };
+}
+
+function rango(r) {
+  const h = fechaAR();
+  const m = { 7: [sumarDias(h, -6), h], 30: [sumarDias(h, -29), h], mes: [h.slice(0, 8) + "01", h],
+              ant: (() => { const f = sumarDias(h.slice(0, 8) + "01", -1); return [f.slice(0, 8) + "01", f]; })() }[r];
+  $("desde").value = m[0]; $("hasta").value = m[1]; ver();
+}
+const params = () => new URLSearchParams({ desde: $("desde").value, hasta: $("hasta").value, transporte: $("f-tte").value });
+
+async function ver() {
+  $("estado").textContent = "Calculando…";
+  try {
+    const r = await fetch(`${P}/api/analisis?${params()}`, { credentials: "same-origin" });
+    const d = await r.json();
+    if (!r.ok || d.ok === false) throw new Error(d.error || "Error " + r.status);
+    datos = d; pintar();
+    $("estado").textContent = `${dmy(d.desde)} a ${dmy(d.hasta)} · ${d.dias} día(s) con movimientos`;
+    $("titulo-imp").textContent = `Período ${dmy(d.desde)} a ${dmy(d.hasta)}${$("f-tte").value ? " · " + $("f-tte").selectedOptions[0].textContent : ""}`;
+  } catch (e) { $("estado").textContent = "No se pudo calcular (" + e.message + ")"; }
+}
+
+function base(c, extra = {}) {
+  return { responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: c.fg, boxWidth: 12, usePointStyle: true } }, tooltip: { padding: 10 } },
+    scales: { x: { ticks: { color: c.muted }, grid: { display: false }, border: { color: c.line } },
+              y: { beginAtZero: true, ticks: { color: c.muted, precision: 0 }, grid: { color: c.line }, border: { display: false } } }, ...extra };
+}
+function grafico(id, cfg) { if (graficos[id]) graficos[id].destroy(); graficos[id] = new Chart($(id), cfg); }
+
+function pintar() {
+  const c = colores(), k = datos.kpis;
+  $("k-cump").textContent = pct(k.cumplimiento); $("k-cump-d").textContent = k.meta ? `${k.cargadas} de ${k.meta} (cuota × días)` : "sin cuotas cargadas";
+  $("k-car").textContent = k.cargadas; $("k-car-d").textContent = `${datos.dias} día(s)`;
+  $("k-uso").textContent = pct(k.uso); $("k-uso-d").textContent = `${k.asignadas} asignadas de ${k.cargadas}`;
+  $("k-bloq").textContent = pct(k.pct_bloq); $("k-bloq-d").textContent = `${k.bloqueadas} unidades`;
+  $("k-eta").textContent = k.anticipacion_mediana === null ? "—" : k.anticipacion_mediana + " h";
+  $("k-cho").textContent = pct(k.pct_chofer);
+
+  // 1. línea por día
+  const s = datos.serie;
+  grafico("g-dias", { type: "line", data: { labels: s.map((x) => dmy(x.fecha).slice(0, 5)), datasets: [
+      { label: "Cargadas", data: s.map((x) => x.cargadas), borderColor: c.cargadas, backgroundColor: c.cargadas, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: .2 },
+      { label: "Asignadas", data: s.map((x) => x.asignadas), borderColor: c.asignadas, backgroundColor: c.asignadas, borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: .2 },
+      { label: "Meta (cuota)", data: s.map((x) => x.meta || null), borderColor: c.muted, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0, fill: false } ] },
+    options: base(c) });
+
+  // 2. cumplimiento por transporte (barras horizontales, color = estado, con el % escrito)
+  const rk = datos.ranking.filter((x) => x.cumplimiento !== null);
+  $("graf-cump").style.height = Math.max(180, rk.length * 30 + 60) + "px";
+  const est = (v) => (v >= 100 ? c.ok : v >= 60 ? c.warn : c.bad);
+  grafico("g-cump", { type: "bar", data: { labels: rk.map((x) => x.transporte), datasets: [{ label: "Cumplimiento %", data: rk.map((x) => x.cumplimiento),
+      backgroundColor: rk.map((x) => est(x.cumplimiento)), borderRadius: 4, borderSkipped: "start", barThickness: 16 }] },
+    options: { ...base(c, { indexAxis: "y" }), interaction: { mode: "nearest", intersect: true },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => { const x = rk[t.dataIndex]; return ` ${x.cumplimiento}% · ${x.cargadas} de ${x.meta}`; } } } },
+      scales: { x: { beginAtZero: true, suggestedMax: 100, ticks: { color: c.muted, callback: (v) => v + "%" }, grid: { color: c.line }, border: { display: false } },
+                y: { ticks: { color: c.fg }, grid: { display: false }, border: { color: c.line } } } },
+    plugins: [{ id: "valores", afterDatasetsDraw(ch) { const ctx = ch.ctx; ctx.save(); ctx.font = "600 12px system-ui"; ctx.fillStyle = c.fg; ctx.textBaseline = "middle";
+      ch.getDatasetMeta(0).data.forEach((b, i) => ctx.fillText((rk[i].cumplimiento >= 100 ? "✔ " : rk[i].cumplimiento < 60 ? "✖ " : "") + rk[i].cumplimiento + "%", b.x + 6, b.y)); ctx.restore(); } }] });
+
+  // 3. bases, 4. horas, 5. anticipación (un solo color: magnitud)
+  const bs = datos.bases.slice(0, 12);
+  grafico("g-bases", { type: "bar", data: { labels: bs.map((b) => b.base), datasets: [{ label: "Asignadas", data: bs.map((b) => b.asignadas), backgroundColor: c.cargadas, borderRadius: 4, borderSkipped: "start" }] },
+    options: { ...base(c, { indexAxis: "y" }), plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { color: c.muted, precision: 0 }, grid: { color: c.line }, border: { display: false } }, y: { ticks: { color: c.fg }, grid: { display: false } } } } });
+  grafico("g-horas", { type: "bar", data: { labels: datos.horas.map((_, h) => String(h).padStart(2, "0")), datasets: [{ label: "Cargadas", data: datos.horas, backgroundColor: c.cargadas, borderRadius: 4, borderSkipped: "start" }] },
+    options: { ...base(c), plugins: { legend: { display: false }, tooltip: { callbacks: { title: (t) => t[0].label + ":00 a " + t[0].label + ":59" } } } } });
+  const tramos = [["llegó antes de cargar", -1e9, 0], ["0 a 2 h", 0, 2], ["2 a 6 h", 2, 6], ["6 a 12 h", 6, 12], ["12 a 24 h", 12, 24], ["más de 24 h", 24, 1e9]];
+  grafico("g-eta", { type: "bar", data: { labels: tramos.map((t) => t[0]), datasets: [{ label: "Unidades", data: tramos.map(([, a, b]) => datos.anticipacion.filter((h) => h >= a && h < b).length), backgroundColor: c.cargadas, borderRadius: 4, borderSkipped: "start" }] },
+    options: { ...base(c), plugins: { legend: { display: false } } } });
+
+  ishikawa(c);
+  $("t-rank").innerHTML = datos.ranking.map((x) => {
+    const chip = x.cumplimiento === null ? '<span class="chip na">sin cuota</span>' : x.cumplimiento >= 100 ? `<span class="chip ok">✔ ${x.cumplimiento}%</span>`
+      : x.cumplimiento >= 60 ? `<span class="chip warn">${x.cumplimiento}%</span>` : `<span class="chip bad">✖ ${x.cumplimiento}%</span>`;
+    return `<tr><td>${esc(x.transporte)}</td><td class="n">${x.cuota || "—"}</td><td class="n">${x.cargadas}${x.meta ? " / " + x.meta : ""}</td><td>${chip}</td>
+      <td class="n">${x.asignadas}</td><td class="n">${pct(x.uso)}</td><td class="n">${x.bloqueadas}${x.pct_bloq ? " (" + x.pct_bloq + "%)" : ""}</td>
+      <td class="n">${pct(x.pct_eta)}</td><td class="n">${pct(x.pct_chofer)}</td><td class="n">${x.sacadas}</td></tr>`;
+  }).join("") || '<tr><td colspan="10" class="vacio">Sin datos en el período.</td></tr>';
+}
+
+// Diagrama de espina de pescado: 3 categorías arriba, 3 abajo, efecto a la derecha.
+function ishikawa(c) {
+  const svg = $("ishikawa"), ns = "http://www.w3.org/2000/svg", Y = 235, X0 = 70, X1 = 940;
+  const el = (tag, attrs, txt) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt !== undefined) e.textContent = txt; return e; };
+  svg.innerHTML = "";
+  const maxi = Math.max(0, ...datos.ishikawa.flatMap((g) => g.causas.map((x) => x.cantidad)));
+  svg.append(el("path", { class: "espina", d: `M${X0} ${Y} H${X1}` }), el("path", { class: "espina", d: `M${X1 - 14} ${Y - 8} L${X1} ${Y} L${X1 - 14} ${Y + 8}` }));
+  const ef = el("g", { class: "efecto" });
+  ef.append(el("rect", { x: 950, y: Y - 48, width: 240, height: 96, rx: 10 }));
+  const t1 = el("text", { x: 1070, y: Y - 6, "text-anchor": "middle" }, "Disponible incompleto");
+  const t2 = el("text", { x: 1070, y: Y + 16, "text-anchor": "middle" }, "o no apto");
+  ef.append(t1, t2); svg.append(ef);
+  const xs = [385, 650, 915];
+  datos.ishikawa.forEach((g, i) => {
+    const arriba = i < 3, bx = xs[i % 3], dx = 140, yEnd = arriba ? 45 : Y * 2 - 45;
+    svg.append(el("line", { class: "hueso", x1: bx, y1: Y, x2: bx - dx, y2: yEnd }));
+    const total = g.causas.reduce((a, x) => a + x.cantidad, 0);
+    svg.append(el("text", { class: "cat", x: bx - dx, y: arriba ? yEnd - 14 : yEnd + 24, "text-anchor": "middle" }, `${g.categoria} (${total})`));
+    g.causas.forEach((x, j) => {
+      const t = (j + 1) / (g.causas.length + 1), px = bx - dx * t, py = Y + (yEnd - Y) * t;
+      svg.append(el("line", { class: "hueso", x1: px - 34, y1: py, x2: px, y2: py }));
+      const top = x.cantidad && x.cantidad === maxi;
+      const tx = el("text", { class: "causa" + (x.cantidad ? " hay" : ""), x: px - 40, y: py + 4, "text-anchor": "end", tabindex: 0, role: "button" });
+      tx.append(el("tspan", {}, x.texto + " "), el("tspan", { class: "num", fill: x.cantidad ? c.fg : c.muted }, x.cantidad));
+      if (top) tx.append(el("tspan", { class: "marca-top", dx: 4 }, "▲ mayor"));
+      const abrir = () => detalle(g.categoria, x);
+      tx.addEventListener("click", abrir); tx.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } });
+      svg.append(tx);
+    });
+  });
+}
+function detalle(cat, x) {
+  const filas = datos.casos[x.clave] || [];
+  $("det-titulo").textContent = `${cat} · ${x.texto} — ${filas.length} caso(s)`;
+  $("det-filas").innerHTML = filas.slice(0, 500).map((f) => `<tr><td class="nw">${dmy(f.fecha)}</td><td>${esc(f.transporte)}</td><td class="pat">${esc(f.patente)}</td><td>${esc(f.detalle)}</td></tr>`).join("")
+    || '<tr><td colspan="4" class="vacio">Ningún caso en el período.</td></tr>';
+  $("detalle").hidden = false; $("detalle").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.querySelectorAll("[data-r]").forEach((b) => b.addEventListener("click", () => rango(b.dataset.r)));
+$("btn-ver").onclick = ver; $("f-tte").onchange = ver;
+$("btn-csv").onclick = () => { location.href = `${P}/analisis.csv?${params()}`; };
+$("btn-imp").onclick = () => window.print();
+$("det-cerrar").onclick = () => ($("detalle").hidden = true);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => datos && pintar());
+const h = fechaAR(); $("desde").value = sumarDias(h, -29); $("hasta").value = h; ver();
+</script>
+{% endblock %}

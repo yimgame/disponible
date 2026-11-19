@@ -12,24 +12,40 @@
     <b>ETA</b> (fecha y hora estimada de arribo), chofer y un comentario. También puede <b>sacar</b> una unidad.</li>
   <li>Si la unidad o el chofer están <b>bloqueados</b> (maestro de unidades, GCG o lista de bloqueados) se le <b>avisa al cargar</b> y la unidad queda marcada ⛔ en el disponible.</li>
   <li>En el <b>Panel</b> se ve el disponible del día o de un rango, por transporte (contra su cuota) y por día.</li>
-  <li>Cuando se usa una unidad, se marca <b>Usar</b> con el <b>destino</b> (y viaje, planta, detalle): se <b>descuenta</b> del disponible y queda el registro de dónde se usó.</li>
+  <li>Cuando se usa una unidad, se la <b>Asigna</b> a una <b>base</b> y una <b>carga</b>: se <b>descuenta</b> del disponible y queda el registro de a dónde fue.</li>
+  <li>En <b>Análisis</b> se mide el rendimiento: cumplimiento de cuota, uso del disponible, bloqueos y el <b>Ishikawa</b> con las causas.</li>
 </ol></section>
 <section class="card"><h2>📊 Panel</h2>
   <details><summary>Ver un día o un rango</summary><p>Elegí <b>Desde / Hasta</b> o los atajos <b>Hoy, Ayer, 7 días, Este mes</b> y <b>Ver</b>. Con un solo día ves el disponible al momento;
     con un rango, la suma de los cierres de cada día. Se actualiza solo cada minuto cuando mirás hoy.</p></details>
   <details><summary>Qué significa cada número</summary><ul>
     <li><b>Unidades disponibles</b>: las que quedan (las usadas ya están descontadas). Refri y seco con sus pallets.</li>
-    <li><b>Usadas</b>: las que se usaron (se descuentan). <b>Bloqueadas</b>: de las que quedan, cuántas tienen un bloqueo.</li>
+    <li><b>Asignadas</b>: las que ya se asignaron a una base / carga (se descuentan). <b>Bloqueadas</b>: de las que quedan, cuántas tienen un bloqueo.</li>
     <li><b>Cuota</b>: cuántas unidades tiene que poner el transporte por día; se cumple con lo que pusieron (aunque después se hayan usado). Verde = cumplió.</li></ul></details>
-  <details><summary>Usar una unidad (descontar) y registrar dónde se usó</summary><p>Con un solo día elegido, en <b>Unidades del día</b> tocá <b>Usar</b>, completá el <b>destino</b>
-    (obligatorio), viaje u orden, planta y detalle, y <b>Registrar uso</b>. Pasa a <i>Usada</i> y aparece en <b>Usos</b>. Si fue un error, <b>↩ Anular</b> la devuelve al disponible.</p></details>
-  <details><summary>Bajar a Excel</summary><p><b>Bajar CSV</b> baja los movimientos del rango; <b>Bajar usos CSV</b>, los usos con su destino.</p></details>
+  <details><summary>Asignar una unidad a una base / carga (se descuenta)</summary><p>Con un solo día elegido, en <b>Unidades del día</b> tocá <b>Asignar</b>, elegí la <b>base</b>
+    (de la lista; si escribís una nueva se agrega sola), el número de <b>carga / viaje</b>, la planta y un detalle, y <b>✔ Asignar</b>. Pasa a <i>Asignada</i> y aparece en
+    <b>Asignaciones</b>. Si fue un error, <b>↩ Anular</b> la devuelve al disponible.</p></details>
+  <details><summary>Bajar a Excel</summary><p><b>Bajar CSV</b> baja los movimientos del rango; <b>Bajar asignaciones CSV</b>, las asignaciones con su base y carga.</p></details>
   <details><summary>Pedirle el disponible a un transporte</summary><p>En <b>Por transporte</b>: <b>Copiar link</b> o <b>Correr por WhatsApp</b> (abre WhatsApp con el mensaje y su link; hace falta el celular cargado).</p></details>
 </section>
 <section class="card"><h2>🚚 Transportes</h2>
   <details><summary>Dar de alta un transporte y su link</summary><p>Abajo del Panel (o en <b>Transportes</b>): elegí el nombre de la lista (sale del maestro de unidades, así ve sus unidades
     al cargar), la <b>cuota diaria</b> y el <b>celular</b>, y <b>Guardar</b>. Para cambiar cuota o celular, cargalo de nuevo con el mismo nombre: el link no cambia.</p></details>
+  <details><summary>Generar los links de todos los proveedores de una vez</summary><p>En <b>Transportes y bases → Generar links para los proveedores del maestro</b>:
+    crea un transporte con su link por cada proveedor del maestro de unidades que no tenga uno. <b>🔍 Revisar</b> muestra cuántos y <b>⚡ Generar links</b> los crea; después les cargás cuota y celular.</p></details>
+  <details><summary>Bases / destinos</summary><p>En <b>Transportes y bases</b>, abajo: agregar, renombrar o desactivar las bases que se eligen al asignar.</p></details>
   <details><summary>Dar de baja o cambiar el link</summary><p>En <b>Transportes</b>: estado <b>De baja</b> (su link deja de andar) o <b>🔁 Link nuevo</b> (el anterior deja de funcionar).</p></details>
+</section>
+<section class="card"><h2>📈 Análisis e Ishikawa</h2>
+  <details><summary>Qué mide</summary><ul>
+    <li><b>Cumplimiento de cuota</b>: cargadas contra cuota × días (por transporte, con semáforo).</li>
+    <li><b>Uso del disponible</b>: qué parte de lo cargado se asignó. <b>Bloqueadas</b>, <b>con chofer</b> y <b>anticipación del ETA</b> (cuántas horas antes avisan).</li>
+    <li>Gráficos por día, por base, por hora de carga y de anticipación, y el <b>ranking de transportes</b>.</li></ul></details>
+  <details><summary>Cómo leer el Ishikawa</summary><p>El efecto es «disponible incompleto o no apto». Cada espina es una categoría (Transporte, Unidad, Chofer,
+    Documentación, Bloqueos, Asignación) con sus causas y cuántas veces pasó en el período; la mayor está marcada con ▲. Tocá una causa para ver los casos
+    (fecha, transporte, patente, detalle).</p></details>
+  <details><summary>Reporte</summary><p><b>Bajar reporte</b> baja un Excel (CSV) con los indicadores, el ranking, las causas con su detalle y las bases.
+    <b>Imprimir / PDF</b> imprime la pantalla (o la guarda como PDF).</p></details>
 </section>
 <section class="card"><h2>⛔ Bloqueos y documentos</h2>
   <details><summary>De dónde salen los bloqueos</summary><ul>
@@ -54,7 +70,7 @@
 </section>
 {% if 'usuarios' in u.puede %}
 <section class="card"><h2>👥 Usuarios e integraciones</h2>
-  <details><summary>Roles</summary><p><b>Administrador</b>: todo. <b>Operador</b>: usa unidades, transportes, importa y bloquea. <b>Consulta</b>: solo mira.
+  <details><summary>Roles</summary><p><b>Administrador</b>: todo. <b>Operador</b>: asigna unidades, maneja transportes y bases, importa y bloquea. <b>Consulta</b>: solo mira.
     En <b>Usuarios</b> se crean con una contraseña temporal (se muestra una sola vez).</p></details>
   <details><summary>Conectar n8n o un agente de IA</summary><p>Ver <b>Integraciones</b>: webhook saliente con cada evento y API con llave para consultar y cargar.</p></details>
 </section>

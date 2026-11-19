@@ -13,7 +13,8 @@
   {% if u %}
   <nav>
     <a href="{{ P }}/">Panel</a>
-    <a href="{{ P }}/transportes">Transportes</a>
+    <a href="{{ P }}/analisis">Análisis</a>
+    <a href="{{ P }}/transportes">Transportes y bases</a>
     <a href="{{ P }}/consulta">Consulta</a>
     {% if 'gestion' in u.puede %}<a href="{{ P }}/importar">Importar</a>{% endif %}
     {% if 'usuarios' in u.puede %}<a href="{{ P }}/usuarios">Usuarios</a><a href="{{ P }}/integraciones">Integraciones</a>{% endif %}

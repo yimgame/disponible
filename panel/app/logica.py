@@ -220,7 +220,8 @@ def registrar_movimiento(t, b, informante="link"):
             "hora": ahora.strftime("%H:%M"), "transporte_id": t["id"], "transporte": t["nombre"], "patente": patente,
             "tipo": tipo, "pallets": pallets or None, "accion": accion, "eta": eta, "chofer_dni": dni,
             "chofer_nombre": chofer_nombre, "comentario": _txt(b.get("comentario"), 200), "informante": informante,
-            "bloqueado": 1 if bloq else 0, "bloqueo_motivo": " · ".join(bloq)[:500]}
+            "bloqueado": 1 if bloq else 0, "bloqueo_motivo": " · ".join(bloq)[:500],
+            "avisos": " · ".join(a["texto"] for a in al if a["nivel"] != "bloqueo")[:800]}
     with closing(db.con()) as c, c:
         fila["id"] = c.execute(f"INSERT INTO movimientos ({', '.join(fila)}) VALUES ({', '.join('?' * len(fila))})",
                                list(fila.values())).lastrowid
@@ -303,10 +304,11 @@ def usar(patente, datos, usuario, fecha=None):
     if not f:
         raise Error(f"{p} no está en el disponible del {fecha}.")
     if f["estado"] != "disponible":
-        raise Error(f"{p} ya fue usada.")
+        raise Error(f"{p} ya fue asignada.")
     destino = _txt(datos.get("destino"), 120)
     if not destino:
-        raise Error("Poné dónde se usó (destino).")
+        raise Error("Elegí la base o el destino al que se asigna.")
+    guardar_base(destino, solo_si_no_existe=True)
     uso = {"creado": db.ahora().isoformat(timespec="microseconds"), "fecha": fecha, "movimiento_id": f["movimiento_id"],
            "transporte_id": f["transporte_id"], "transporte": f["transporte"], "patente": p, "tipo": f["tipo"],
            "pallets": f["pallets"], "destino": destino, "viaje": _txt(datos.get("viaje"), 60),
@@ -485,3 +487,191 @@ def rango(desde, hasta):
     return {"desde": d0.isoformat(), "hasta": d1.isoformat(), "dias": cierres, "transportes": tts,
             "movimientos": listar("movimientos", d0.isoformat(), d1.isoformat()),
             "usos": listar("usos", d0.isoformat(), d1.isoformat())}
+
+
+
+# ------------------------------------------------------------------ bases / destinos
+def bases(solo_activas=False):
+    with closing(db.con()) as c:
+        filas = [dict(r) for r in c.execute("""SELECT b.*, (SELECT COUNT(*) FROM usos u WHERE u.destino = b.nombre COLLATE NOCASE
+                                                       AND u.anulado = 0) AS usos FROM bases b ORDER BY b.nombre COLLATE NOCASE""")]
+    return [b for b in filas if b["activo"] or not solo_activas]
+
+
+def guardar_base(nombre, tipo=None, activo=1, bid=None, solo_si_no_existe=False):
+    nombre = _txt(nombre, 120)
+    if len(nombre) < 2:
+        raise Error("Poné el nombre de la base.")
+    with closing(db.con()) as c, c:
+        ya = c.execute("SELECT id FROM bases WHERE nombre=? COLLATE NOCASE", (nombre,)).fetchone()
+        if solo_si_no_existe:
+            if not ya:
+                c.execute("INSERT INTO bases (nombre, tipo, activo, creado) VALUES (?,?,1,?)", (nombre, tipo, db.ahora_iso()))
+            return
+        if bid:
+            if ya and ya["id"] != bid:
+                raise Error("Ya hay una base con ese nombre.")
+            c.execute("UPDATE bases SET nombre=?, tipo=?, activo=? WHERE id=?", (nombre, _txt(tipo, 40) or None, 1 if activo else 0, bid))
+        elif ya:
+            raise Error("Esa base ya existe.")
+        else:
+            c.execute("INSERT INTO bases (nombre, tipo, activo, creado) VALUES (?,?,1,?)", (nombre, _txt(tipo, 40) or None, db.ahora_iso()))
+
+
+# ------------------------------------------------------------------ links para todos los proveedores del maestro
+def generar_transportes_maestro(min_unidades=1, simular=True):
+    """Crea un transporte (con su link) por cada proveedor del maestro de unidades que todavía no tenga uno."""
+    existentes = transportes()
+    por_prov = {t["nro_proveedor"] for t in existentes if t["nro_proveedor"]}
+    por_nombre = {_clave(t["nombre"]) for t in existentes}
+    nuevos = [m for m in transportistas_del_maestro() if (m["unidades"] or 0) >= min_unidades and m["nro_proveedor"]
+              and m["nro_proveedor"] not in por_prov and _clave(m["nombre"]) not in por_nombre]
+    if not simular:
+        for m in nuevos:
+            try:
+                guardar_transporte({"nombre": m["nombre"], "nro_proveedor": m["nro_proveedor"], "cuota_dia": 0})
+            except Error:                                  # mismo nombre que otro proveedor: lo distingo
+                guardar_transporte({"nombre": f"{m['nombre']} ({m['nro_proveedor']})"[:80], "nro_proveedor": m["nro_proveedor"]})
+    return {"nuevos": len(nuevos), "ya_tenian": len(por_prov), "ejemplos": [m["nombre"] for m in nuevos[:12]]}
+
+
+# ------------------------------------------------------------------ análisis de rendimiento + Ishikawa
+CAUSAS = {   # categoría -> [(clave, texto)]
+    "Transporte": [("bajo_cuota", "Días por debajo de la cuota"), ("sin_cargar", "Días sin cargar nada"),
+                   ("sacadas", "Sacó unidades ya cargadas"), ("sin_eta", "Cargadas sin ETA")],
+    "Unidad": [("bloq_maestro", "Bloqueada en el maestro de unidades"), ("expiracion", "Fecha de expiración vencida"),
+               ("fuera_maestro", "Patente que no está en el maestro")],
+    "Chofer": [("chofer_gcg", "Chofer no habilitado en GCG"), ("chofer_bloq", "Chofer bloqueado (lista o manual)"),
+               ("sin_chofer", "Cargadas sin chofer informado"), ("chofer_fuera_gcg", "Chofer que no figura en GCG")],
+    "Documentación": [("docs_unidad", "Documentos vencidos de la unidad"), ("docs_chofer", "Documentos vencidos del chofer"),
+                      ("docs_por_vencer", "Documentos por vencer (15 días)")],
+    "Bloqueos": [("unidad_gcg", "Unidad no habilitada en GCG"), ("unidad_lista", "Unidad en lista de bloqueados o manual")],
+    "Asignación": [("ociosas", "Disponibles que quedaron sin asignar"), ("asignadas_bloq", "Asignadas estando bloqueadas"),
+                   ("anuladas", "Asignaciones anuladas")],
+}
+
+
+def analisis(desde, hasta, transporte_id=None):
+    r = rango(desde, hasta)
+    tts = {t["id"]: t for t in r["transportes"]}
+    movs = [m for m in r["movimientos"] if not transporte_id or m["transporte_id"] == transporte_id]
+    usos = [u for u in r["usos"] if not transporte_id or u["transporte_id"] == transporte_id]
+    with closing(db.con()) as c:
+        en_maestro = {x[0] for x in c.execute("SELECT patente FROM unidades")}
+    dias = sorted(d["fecha"] for d in r["dias"])
+    activos = [t for t in tts.values() if t["activo"] and (not transporte_id or t["id"] == transporte_id)]
+    meta_dia = sum(t["cuota_dia"] or 0 for t in activos)
+
+    serie, por_t = [], {}
+    casos = {k: [] for cat in CAUSAS.values() for k, _ in cat}
+    for d in r["dias"]:
+        filas = [f for f in d["filas"] if not transporte_id or f["transporte_id"] == transporte_id]
+        car = len(filas)
+        asi = sum(f["estado"] == "usada" for f in filas)
+        serie.append({"fecha": d["fecha"], "cargadas": car, "asignadas": asi, "meta": meta_dia,
+                      "refri": sum(f["tipo"] == "refri" for f in filas), "seco": sum(f["tipo"] != "refri" for f in filas)})
+        cnt = {}
+        for f in filas:
+            g = por_t.setdefault(f["transporte_id"], {"cargadas": 0, "asignadas": 0, "bloqueadas": 0, "ociosas": 0})
+            g["cargadas"] += 1
+            cnt[f["transporte_id"]] = cnt.get(f["transporte_id"], 0) + 1
+            if f["estado"] == "usada":
+                g["asignadas"] += 1
+                if f["bloqueado"]:
+                    casos["asignadas_bloq"].append({"fecha": d["fecha"], "transporte": f["transporte"], "patente": f["patente"], "detalle": f["bloqueo_motivo"]})
+            else:
+                g["ociosas"] += 1
+                casos["ociosas"].append({"fecha": d["fecha"], "transporte": f["transporte"], "patente": f["patente"], "detalle": "quedó disponible al cierre"})
+            g["bloqueadas"] += f["bloqueado"]
+        for t in activos:
+            if t["cuota_dia"] and cnt.get(t["id"], 0) < t["cuota_dia"]:
+                det = f"cargó {cnt.get(t['id'], 0)} de {t['cuota_dia']}"
+                casos["bajo_cuota"].append({"fecha": d["fecha"], "transporte": t["nombre"], "patente": "", "detalle": det})
+                if not cnt.get(t["id"]):
+                    casos["sin_cargar"].append({"fecha": d["fecha"], "transporte": t["nombre"], "patente": "", "detalle": det})
+    serie.sort(key=lambda x: x["fecha"])
+
+    horas, anticip = [0] * 24, []
+    for m in movs:
+        base = {"fecha": m["fecha"], "transporte": m["transporte"], "patente": m["patente"]}
+        if m["accion"] == "quita":
+            casos["sacadas"].append({**base, "detalle": m["comentario"] or ""})
+            continue
+        horas[int((m["hora"] or "0:0").split(":")[0]) % 24] += 1
+        if m["eta"]:
+            try:
+                h = (datetime.fromisoformat(m["eta"]) - datetime.fromisoformat(m["creado"][:19])).total_seconds() / 3600
+                anticip.append(round(h, 1))
+            except ValueError:
+                pass
+        else:
+            casos["sin_eta"].append({**base, "detalle": ""})
+        if m["patente"] not in en_maestro:
+            casos["fuera_maestro"].append({**base, "detalle": ""})
+        if not m["chofer_dni"]:
+            casos["sin_chofer"].append({**base, "detalle": ""})
+        # cada motivo / aviso por separado (vienen unidos con " · ")
+        partes = [x.strip() for x in ((m["bloqueo_motivo"] or "") + " · " + (m.get("avisos") or "")).split(" · ") if x.strip()]
+        reglas = (("bloq_maestro", lambda x: x.startswith("Unidad bloqueada en el maestro")),
+                  ("chofer_gcg", lambda x: x.startswith("Chofer ") and x.endswith("en GCG")),
+                  ("chofer_bloq", lambda x: x.startswith("Chofer bloqueado:")),
+                  ("unidad_gcg", lambda x: x.startswith("Unidad ") and x.endswith("en GCG")),
+                  ("unidad_lista", lambda x: x.startswith("Unidad bloqueada:")),
+                  ("expiracion", lambda x: "expiración vencida" in x),
+                  ("docs_unidad", lambda x: x.startswith("GCG unidad, documentos vencidos")),
+                  ("docs_chofer", lambda x: x.startswith("GCG chofer, documentos vencidos")),
+                  ("docs_por_vencer", lambda x: "documentos por vencer" in x),
+                  ("chofer_fuera_gcg", lambda x: "no figura en el último exporte de GCG" in x))
+        for clave, cumple in reglas:
+            hit = next((x for x in partes if cumple(x)), None)
+            if hit:
+                casos[clave].append({**base, "detalle": hit[:200]})
+    with closing(db.con()) as c:
+        anuladas = [dict(x) for x in c.execute("""SELECT fecha, transporte, patente, destino, anulado_por FROM usos
+                                                  WHERE anulado=1 AND fecha BETWEEN ? AND ?""", (r["desde"], r["hasta"]))]
+    for a in anuladas:
+        if not transporte_id or a["transporte"] == (tts.get(transporte_id) or {}).get("nombre"):
+            casos["anuladas"].append({"fecha": a["fecha"], "transporte": a["transporte"], "patente": a["patente"],
+                                      "detalle": f"{a['destino']} · anuló {a['anulado_por']}"})
+
+    n = max(1, len(dias))
+    ranking = []
+    for t in activos if transporte_id else [t for t in tts.values() if t["activo"] or t["id"] in por_t]:
+        g = por_t.get(t["id"], {"cargadas": 0, "asignadas": 0, "bloqueadas": 0, "ociosas": 0})
+        mt = [m for m in movs if m["transporte_id"] == t["id"] and m["accion"] == "agrega"]
+        meta = (t["cuota_dia"] or 0) * n
+        ranking.append({"transporte": t["nombre"], "transporte_id": t["id"], "cuota": t["cuota_dia"], "meta": meta, **g,
+                        "cumplimiento": round(g["cargadas"] * 100 / meta) if meta else None,
+                        "uso": round(g["asignadas"] * 100 / g["cargadas"]) if g["cargadas"] else None,
+                        "pct_bloq": round(g["bloqueadas"] * 100 / g["cargadas"]) if g["cargadas"] else None,
+                        "pct_eta": round(sum(1 for m in mt if m["eta"]) * 100 / len(mt)) if mt else None,
+                        "pct_chofer": round(sum(1 for m in mt if m["chofer_dni"]) * 100 / len(mt)) if mt else None,
+                        "sacadas": sum(1 for m in movs if m["transporte_id"] == t["id"] and m["accion"] == "quita")})
+    ranking = [x for x in ranking if x["meta"] or x["cargadas"]]
+    ranking.sort(key=lambda x: (x["cumplimiento"] if x["cumplimiento"] is not None else 999, x["transporte"]))
+
+    bases_ = {}
+    for u in usos:
+        if not u["anulado"]:
+            b = bases_.setdefault(u["destino"], {"base": u["destino"], "asignadas": 0, "refri": 0, "seco": 0, "pallets": 0})
+            b["asignadas"] += 1
+            b["refri" if u["tipo"] == "refri" else "seco"] += 1
+            b["pallets"] += u["pallets"] or 0
+    tot_c = sum(s["cargadas"] for s in serie)
+    tot_a = sum(s["asignadas"] for s in serie)
+    tot_meta = meta_dia * n if serie else 0
+    anticip.sort()
+    ishikawa = [{"categoria": cat, "causas": [{"clave": k, "texto": txt, "cantidad": len(casos[k])} for k, txt in items]}
+                for cat, items in CAUSAS.items()]
+    return {"desde": r["desde"], "hasta": r["hasta"], "dias": len(dias),
+            "kpis": {"cargadas": tot_c, "asignadas": tot_a, "meta": tot_meta,
+                     "cumplimiento": round(tot_c * 100 / tot_meta) if tot_meta else None,
+                     "uso": round(tot_a * 100 / tot_c) if tot_c else None,
+                     "bloqueadas": sum(g["bloqueadas"] for g in por_t.values()),
+                     "pct_bloq": round(sum(g["bloqueadas"] for g in por_t.values()) * 100 / tot_c) if tot_c else None,
+                     "anticipacion_mediana": anticip[len(anticip) // 2] if anticip else None,
+                     "pct_chofer": round(sum(1 for m in movs if m["accion"] == "agrega" and m["chofer_dni"]) * 100 /
+                                         max(1, sum(1 for m in movs if m["accion"] == "agrega"))) if movs else None},
+            "serie": serie, "ranking": ranking, "bases": sorted(bases_.values(), key=lambda b: -b["asignadas"]),
+            "horas": horas, "anticipacion": anticip, "ishikawa": ishikawa, "casos": casos,
+            "efecto": "Disponible incompleto o no apto"}

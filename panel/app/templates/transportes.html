@@ -2,7 +2,8 @@
 {% block titulo %}Transportes · Disponible{% endblock %}
 {% block contenido %}
 {% set gestion = 'gestion' in u.puede %}
-<header><h1>Transportes</h1><p class="sub">Cada transporte carga su disponible con su link (sin usuario ni clave).</p></header>
+<header><h1>Transportes y bases</h1><p class="sub">Cada transporte (proveedor) carga su disponible con su link, sin usuario ni clave.
+  Las bases son los destinos a los que se asignan las unidades.</p></header>
 {% if msg %}<p class="aviso">✔ {{ msg }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 <section class="card">
@@ -35,6 +36,15 @@
 </section>
 {% if gestion %}
 <section class="card">
+  <h2>Generar links para los proveedores del maestro</h2>
+  <p class="suave">Crea de una vez un transporte con su link por cada proveedor del maestro de unidades que todavía no tenga uno
+    (con su nº de proveedor, para que vea sus unidades al cargar). Después les ponés la cuota y el celular.</p>
+  <div class="filtros"><label>Solo proveedores con al menos <input id="g-min" type="number" min="1" value="1" style="width:5rem"> unidades</label>
+    <button type="button" id="g-rev">🔍 Revisar</button><button type="button" class="pri" id="g-ok" disabled>⚡ Generar links</button></div>
+  <p id="g-res" class="vacio"></p>
+</section>
+
+<section class="card">
   <h2>Agregar transporte</h2>
   <form method="post" class="filtros">
     <label>Nombre <input name="nombre" required list="maestro" maxlength="80" autocomplete="off" id="n-nombre"></label>
@@ -47,8 +57,48 @@
   <p class="vacio">El nº de proveedor es el «ID Transportista» del maestro de unidades: con eso el transporte ve sus unidades al cargar. Si lo elegís de la lista se completa solo.</p>
 </section>
 {% endif %}
+<section class="card" id="bases">
+  <h2>Bases / destinos ({{ bases|length }})</h2>
+  <p class="suave">Las que aparecen para elegir al <b>asignar</b> una unidad. Si al asignar se escribe una base nueva, se agrega sola.</p>
+  {% if bases %}
+  <div class="tabla"><table>
+    <thead><tr><th>Base</th><th>Tipo</th><th class="n">Asignaciones</th><th>Estado</th>{% if gestion %}<th></th>{% endif %}</tr></thead>
+    <tbody>{% for b in bases %}
+      <tr class="{{ '' if b.activo else 'apagado' }}">
+        {% if gestion %}<td><input form="b{{ b.id }}" name="nombre" value="{{ b.nombre }}" maxlength="120"></td>
+        <td><input form="b{{ b.id }}" name="tipo" value="{{ b.tipo or '' }}" maxlength="40" placeholder="CD, planta, cliente…"></td>
+        <td class="n">{{ b.usos }}</td>
+        <td><select form="b{{ b.id }}" name="activo"><option value="1" {{ 'selected' if b.activo }}>Activa</option><option value="0" {{ 'selected' if not b.activo }}>Inactiva</option></select></td>
+        <td><button form="b{{ b.id }}" class="chico pri">Guardar</button></td>
+        {% else %}<td>{{ b.nombre }}</td><td>{{ b.tipo or '' }}</td><td class="n">{{ b.usos }}</td><td>{{ 'Activa' if b.activo else 'Inactiva' }}</td>{% endif %}
+      </tr>{% endfor %}</tbody>
+  </table></div>
+  {% for b in bases %}<form method="post" action="{{ P }}/bases" id="b{{ b.id }}"><input type="hidden" name="id" value="{{ b.id }}"></form>{% endfor %}
+  {% else %}<p class="vacio">Todavía no hay bases.</p>{% endif %}
+  {% if gestion %}
+  <form method="post" action="{{ P }}/bases" class="filtros" style="margin-top:.6rem">
+    <label>Nueva base <input name="nombre" required maxlength="120" placeholder="ej. CD Pilar"></label>
+    <label>Tipo <input name="tipo" maxlength="40" placeholder="CD, planta, cliente…"></label>
+    <button class="pri">Agregar</button>
+  </form>
+  {% endif %}
+</section>
+
 <script>
 const MAESTRO = {{ maestro | tojson }};
+const P = "{{ P }}";
+async function generar(simular) {
+  const r = await fetch(P + "/transportes/generar", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ min_unidades: document.getElementById("g-min").value, simular }) });
+  const d = await r.json().catch(() => ({})), res = document.getElementById("g-res");
+  if (!r.ok || !d.ok) { res.textContent = d.error || d.detail || "No se pudo"; return; }
+  res.textContent = simular ? `Se van a crear ${d.nuevos} transportes con su link${d.ejemplos.length ? " (ej. " + d.ejemplos.slice(0, 6).join(", ") + ")" : ""}.`
+                            : `✔ Listo: ${d.nuevos} transportes creados.`;
+  document.getElementById("g-ok").disabled = !simular || !d.nuevos;
+  if (!simular) setTimeout(() => location.reload(), 1500);
+}
+const gr = document.getElementById("g-rev");
+if (gr) { gr.onclick = () => generar(true); document.getElementById("g-ok").onclick = () => { if (confirm("¿Crear los transportes con su link?")) generar(false); }; }
 const nn = document.getElementById("n-nombre");
 if (nn) nn.addEventListener("change", () => { const m = MAESTRO.find((x) => x.nombre === nn.value); if (m) document.getElementById("n-prov").value = m.nro_proveedor || ""; });
 document.body.addEventListener("click", async (e) => {

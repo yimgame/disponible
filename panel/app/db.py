@@ -47,7 +47,15 @@ CREATE TABLE IF NOT EXISTS usos (
     transporte_id INTEGER, transporte TEXT, patente TEXT NOT NULL, tipo TEXT, pallets INTEGER, destino TEXT, viaje TEXT,
     planta TEXT, detalle TEXT, usuario TEXT, anulado INTEGER NOT NULL DEFAULT 0, anulado_por TEXT, anulado_en TEXT);
 CREATE INDEX IF NOT EXISTS usos_fecha ON usos(fecha);
+
+-- Bases / destinos a los que se asignan las unidades (lista que se administra en el panel).
+CREATE TABLE IF NOT EXISTS bases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL UNIQUE COLLATE NOCASE, tipo TEXT,
+    activo INTEGER NOT NULL DEFAULT 1, creado TEXT);
 """
+
+# Columnas agregadas después de la primera versión (la base se migra sola).
+COLUMNAS_NUEVAS = {"movimientos": ["avisos TEXT"]}
 
 
 def con():
@@ -62,6 +70,11 @@ def iniciar():
     with closing(con()) as c, c:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(ESQUEMA)
+        for tabla, cols in COLUMNAS_NUEVAS.items():
+            existentes = {r["name"] for r in c.execute(f"PRAGMA table_info({tabla})")}
+            for col in cols:
+                if col.split()[0] not in existentes:
+                    c.execute(f"ALTER TABLE {tabla} ADD COLUMN {col}")
 
 
 def ahora():
