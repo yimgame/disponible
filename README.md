@@ -22,6 +22,12 @@ docker compose up -d --build
 Panel: `http://localhost:8140/panel/` con `admin` y la contraseña del `.env` (pide cambiarla). La base se crea sola.
 Para publicarlo en internet poné adelante un proxy con HTTPS.
 
+### ¿Te quedaste sin acceso al panel?
+
+`reset_admin.bat` (Windows) o `./reset_admin.sh` (Linux) resetea la clave del usuario `admin` (o el que le pases) y
+muestra una temporal; al entrar pide cambiarla. Si el panel corre en Docker lo hace dentro del container
+`disponible-panel`; también `docker exec disponible-panel python -m app.reset_admin [usuario] [clave]`.
+
 ## Pantallas
 
 - **Panel**: Desde/Hasta (Hoy, Ayer, 7 días, Este mes), totales (disponibles, refri, seco, usadas, bloqueadas,
