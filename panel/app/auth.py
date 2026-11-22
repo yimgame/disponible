@@ -22,7 +22,6 @@ MAX_FALLOS, VENTANA = 8, 15 * 60          # 8 intentos fallidos por IP cada 15 m
 # Argon2id (por defecto en argon2-cffi): 3 pasadas, 64 MiB, 4 hilos — parámetros recomendados (RFC 9106).
 ph = PasswordHasher()
 _HASH_FALSO = ph.hash(secrets.token_urlsafe(16))
-_fallos = {}
 
 
 def con():
@@ -41,6 +40,9 @@ def iniciar():
             ultimo_ingreso TEXT);
         CREATE TABLE IF NOT EXISTS sesiones (
             token TEXT PRIMARY KEY, usuario TEXT NOT NULL, vence REAL NOT NULL);
+        -- intentos de login fallidos (en la base, así reset_admin puede liberar la espera sin reiniciar)
+        CREATE TABLE IF NOT EXISTS login_fallos (ip TEXT NOT NULL, cuando REAL NOT NULL);
+        CREATE INDEX IF NOT EXISTS login_fallos_ip ON login_fallos(ip);
         """)
         cols = {r["name"] for r in c.execute("PRAGMA table_info(usuarios)")}
         if "rol" not in cols:
@@ -57,9 +59,15 @@ def iniciar():
 
 
 def bloqueado(ip):
-    ahora = time.time()
-    _fallos[ip] = [t for t in _fallos.get(ip, []) if ahora - t < VENTANA]
-    return len(_fallos[ip]) >= MAX_FALLOS
+    with closing(con()) as c, c:
+        c.execute("DELETE FROM login_fallos WHERE cuando < ?", (time.time() - VENTANA,))
+        return c.execute("SELECT COUNT(*) FROM login_fallos WHERE ip=?", (ip,)).fetchone()[0] >= MAX_FALLOS
+
+
+def desbloquear_todo():
+    """Libera la espera por intentos fallidos (todas las IP). Devuelve cuántos intentos se borraron."""
+    with closing(con()) as c, c:
+        return c.execute("DELETE FROM login_fallos").rowcount
 
 
 def ingresar(usuario, clave, ip):
@@ -73,7 +81,7 @@ def ingresar(usuario, clave, ip):
         except (VerifyMismatchError, VerificationError, InvalidHashError):
             ok = False
         if not ok:
-            _fallos.setdefault(ip, []).append(time.time())
+            c.execute("INSERT INTO login_fallos VALUES (?,?)", (ip, time.time()))
             return None
         if ph.check_needs_rehash(u["clave_hash"]):
             c.execute("UPDATE usuarios SET clave_hash=? WHERE usuario=?", (ph.hash(clave), usuario))
@@ -81,7 +89,7 @@ def ingresar(usuario, clave, ip):
         c.execute("DELETE FROM sesiones WHERE vence < ?", (time.time(),))
         c.execute("INSERT INTO sesiones VALUES (?,?,?)", (token, usuario, time.time() + SESION_HORAS * 3600))
         c.execute("UPDATE usuarios SET ultimo_ingreso=datetime('now') WHERE usuario=?", (usuario,))
-        _fallos.pop(ip, None)
+        c.execute("DELETE FROM login_fallos WHERE ip=?", (ip,))
         return token
 
 

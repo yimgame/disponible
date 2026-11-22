@@ -25,7 +25,8 @@ Para publicarlo en internet poné adelante un proxy con HTTPS.
 ### ¿Te quedaste sin acceso al panel?
 
 `reset_admin.bat` (Windows) o `./reset_admin.sh` (Linux) resetea la clave del usuario `admin` (o el que le pases) y
-muestra una temporal; al entrar pide cambiarla. Si el panel corre en Docker lo hace dentro del container
+muestra una temporal; al entrar pide cambiarla. También libera la espera por muchos intentos fallidos;
+`reset_admin.bat desbloquear` solo libera esa espera, sin tocar claves. Si el panel corre en Docker lo hace dentro del container
 `disponible-panel`; también `docker exec disponible-panel python -m app.reset_admin [usuario] [clave]`.
 
 ## Pantallas
