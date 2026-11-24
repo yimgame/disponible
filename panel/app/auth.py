@@ -50,6 +50,8 @@ def iniciar():
             c.execute("UPDATE usuarios SET rol = CASE WHEN admin=1 THEN 'admin' ELSE 'consulta' END")
         if "transporte_id" not in cols:
             c.execute("ALTER TABLE usuarios ADD COLUMN transporte_id INTEGER")
+        if "vista" not in cols:                       # preferencia de cada usuario: clasica | solapas
+            c.execute("ALTER TABLE usuarios ADD COLUMN vista TEXT")
         if not c.execute("SELECT 1 FROM usuarios").fetchone():
             usuario = os.environ.get("PANEL_ADMIN_USER", "admin")
             clave = os.environ.get("PANEL_ADMIN_PASSWORD")
@@ -181,3 +183,13 @@ def activar(usuario, activo):
         c.execute("UPDATE usuarios SET activo=? WHERE usuario=?", (1 if activo else 0, usuario))
         if not activo:
             c.execute("DELETE FROM sesiones WHERE usuario=?", (usuario,))
+
+
+VISTAS = ("clasica", "solapas")
+
+
+def guardar_vista(usuario, vista):
+    if vista not in VISTAS:
+        raise ValueError("Vista inválida.")
+    with closing(con()) as c, c:
+        c.execute("UPDATE usuarios SET vista=? WHERE usuario=?", (vista, usuario))

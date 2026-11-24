@@ -2,9 +2,13 @@
 {% block titulo %}Panel de Disponible{% endblock %}
 {% block contenido %}
 {% set gestion = 'gestion' in u.puede %}
-  <header>
-    <h1>Disponible de unidades</h1>
-    <p class="sub">Lo que informan los transportes desde su link. <span id="estado"></span></p>
+  <header class="cabecera-panel">
+    <div><h1>Disponible de unidades</h1>
+    <p class="sub">Lo que informan los transportes desde su link. <span id="estado"></span></p></div>
+    <div class="selector-vista" role="group" aria-label="Vista del panel">
+      <span class="suave">Vista:</span>
+      <button type="button" data-vista="clasica">Una página</button><button type="button" data-vista="solapas">Solapas</button>
+    </div>
   </header>
 
   <section class="card">
@@ -30,8 +34,10 @@
     <div class="kpi"><b id="k-mov">–</b><span>puestas <span class="agrega" id="k-put">–</span> · sacadas <span class="quita" id="k-sac">–</span></span></div>
   </section>
 
+  <nav class="solapas" id="solapas" role="tablist" aria-label="Secciones del disponible"></nav>
+
   <div class="grid2">
-    <section class="card">
+    <section class="card" data-solapa="transporte" data-titulo="Por transporte">
       <h2 id="h-tte">Por transporte</h2>
       <div class="tabla"><table>
         <thead><tr><th>Transporte</th><th class="n">Unid.</th><th class="n">Refri</th><th class="n">Seco</th><th class="n">Pallets</th>
@@ -39,7 +45,7 @@
         <tbody id="t-tte"></tbody>
       </table></div>
     </section>
-    <section class="card">
+    <section class="card" data-solapa="dia" data-titulo="Por día">
       <h2>Por día</h2>
       <div class="tabla"><table>
         <thead><tr><th>Fecha</th><th class="n">Unid.</th><th class="n">Refri u/pl</th><th class="n">Seco u/pl</th><th class="n">Asign.</th><th class="n">Puso</th><th class="n">Sacó</th></tr></thead>
@@ -48,7 +54,7 @@
     </section>
   </div>
 
-  <section class="card" id="sec-unidades">
+  <section class="card" id="sec-unidades" data-solapa="unidades" data-titulo="Unidades del día">
     <h2 id="h-uni">Unidades del día</h2>
     <div class="filtros" style="margin-bottom:.6rem">
       <label>Ver <select id="f-est"><option value="">Disponibles y asignadas</option><option value="disponible">Solo las que quedan</option>
@@ -62,7 +68,7 @@
     </table></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-solapa="asignaciones" data-titulo="Asignaciones">
     <div class="filtros" style="justify-content:space-between;margin-bottom:.4rem"><h2 style="margin:0">Asignaciones <span class="suave">— a qué base / carga fue cada unidad</span></h2>
       <button type="button" id="btn-csv-usos" class="chico">Bajar asignaciones CSV</button></div>
     <div class="tabla"><table>
@@ -71,7 +77,7 @@
     </table></div>
   </section>
 
-  <section class="card">
+  <section class="card" data-solapa="movimientos" data-titulo="Movimientos">
     <h2>Movimientos</h2>
     <div class="tabla"><table>
       <thead><tr><th>Fecha</th><th>Hora</th><th>Transporte</th><th>Patente</th><th>Tipo</th><th class="n">Pallets</th><th>Acción</th><th>ETA</th><th>Chofer</th><th>GCG al cargar</th><th>Comentario</th></tr></thead>
@@ -80,7 +86,7 @@
   </section>
 
   {% if gestion %}
-  <section class="card">
+  <section class="card" data-solapa="links" data-titulo="Transportes y cuotas">
     <h2>Transportes, links y cuotas</h2>
     <form class="filtros" id="alta">
       <label for="a-tte">Transporte (elegí de la lista) <input id="a-tte" required list="lista-ttes" placeholder="Transportes Ejemplo SA" autocomplete="off"></label>
@@ -231,8 +237,13 @@ function pintar() {
 
 function pintarUnidades() {
   const unDia = $('desde').value === $('hasta').value;
-  $('sec-unidades').hidden = !unDia;
-  if (!unDia) return;
+  // en una página la sección se oculta con un rango; en solapas se avisa
+  $('sec-unidades').hidden = !unDia && VISTA !== 'solapas';
+  if (!unDia) {
+    $('h-uni').textContent = 'Unidades del día';
+    $('t-uni').innerHTML = '<tr><td colspan="9" class="vacio">Elegí un solo día (Desde = Hasta, o «Hoy» / «Ayer») para ver las unidades.</td></tr>';
+    contarSolapas(); return;
+  }
   const dia = datos.dias.find(d => d.fecha === $('hasta').value);
   const fT = $('f-tte').value, est = $('f-est').value, q = $('f-q').value.trim().toLowerCase();
   const filas = (dia ? dia.filas : []).filter(f => (!fT || f.transporte === fT) && (!est || (est === 'bloq' ? f.bloqueado : est === 'gcg' ? conPendientes(f.gcg) : f.estado === est)) &&
@@ -249,6 +260,7 @@ function pintarUnidades() {
         `<button type="button" data-anular="${f.uso.id}" title="Vuelve al disponible">↩ Anular</button>`}
         ${f.gcg ? `<button type="button" data-gcg="${f.movimiento_id}" title="Volver a consultar GCG (por si ya actualizaron documentos)">🔄 GCG</button>` : ''}</div>` : ''}</td></tr>`).join('')
     || '<tr><td colspan="9" class="vacio">No hay unidades con ese filtro.</td></tr>';
+  contarSolapas();
 }
 
 function csv() {
@@ -313,6 +325,45 @@ document.body.addEventListener('click', async e => {
   const b = e.target.closest('[data-copiar]'); if (!b) return;
   try { await navigator.clipboard.writeText(b.dataset.copiar); b.textContent = 'Copiado ✔'; } catch { prompt('Copiá el link:', b.dataset.copiar); }
 });
+
+// --- vista: una página o solapas (preferencia de cada usuario, guardada en su usuario)
+let VISTA = "{{ u.vista or 'clasica' }}";
+const SOLAPA_KEY = 'disp_solapa';
+const leerLS = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const guardarLS = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const secciones = () => [...document.querySelectorAll('[data-solapa]')];
+function armarSolapas() {
+  $('solapas').innerHTML = secciones().map(sec => `<button type="button" role="tab" data-ir="${sec.dataset.solapa}">${esc(sec.dataset.titulo)} <span class="cuenta" data-cuenta="${sec.dataset.solapa}"></span></button>`).join('');
+}
+function abrirSolapa(id) {
+  const secs = secciones();
+  if (!secs.some(sec => sec.dataset.solapa === id)) id = secs[0].dataset.solapa;
+  secs.forEach(sec => sec.classList.toggle('activa', sec.dataset.solapa === id));
+  document.querySelectorAll('#solapas [data-ir]').forEach(b => { const on = b.dataset.ir === id; b.classList.toggle('activa', on); b.setAttribute('aria-selected', on); });
+  guardarLS(SOLAPA_KEY, id);
+}
+function aplicarVista(v) {
+  VISTA = v;
+  document.body.classList.toggle('vista-solapas', v === 'solapas');
+  document.querySelectorAll('[data-vista]').forEach(b => b.classList.toggle('pri', b.dataset.vista === v));
+  if (v === 'solapas') abrirSolapa(leerLS(SOLAPA_KEY) || 'transporte');
+  if (datos.dias) pintarUnidades();
+}
+function contarSolapas() {
+  const n = (sel) => document.querySelectorAll(sel).length;
+  const dia = (datos.dias || []).find(d => d.fecha === $('hasta').value);
+  const cuenta = { transporte: n('#t-tte tr td.n') ? n('#t-tte tr') : '', dia: (datos.dias || []).length || '',
+                   unidades: $('desde').value === $('hasta').value && dia ? dia.filas.length : '',
+                   asignaciones: (datos.usos || []).filter(x => !x.anulado).length || '', movimientos: (datos.movimientos || []).length || '' };
+  document.querySelectorAll('[data-cuenta]').forEach(el => { const v = cuenta[el.dataset.cuenta]; el.textContent = v === '' || v === undefined ? '' : v; });
+}
+$('solapas').addEventListener('click', e => { const b = e.target.closest('[data-ir]'); if (b) abrirSolapa(b.dataset.ir); });
+document.querySelectorAll('[data-vista]').forEach(b => b.addEventListener('click', async () => {
+  aplicarVista(b.dataset.vista);
+  try { await fetch(P + '/api/preferencias', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+                                               body: JSON.stringify({ vista: b.dataset.vista }) }); } catch {}
+}));
+armarSolapas(); aplicarVista(VISTA);
 
 document.querySelectorAll('[data-r]').forEach(b => b.addEventListener('click', () => rango(b.dataset.r)));
 $('btn-ver').addEventListener('click', ver); $('btn-csv').addEventListener('click', csv);

@@ -190,6 +190,19 @@ def hoy(req: Request):
                                                          "bases": [b["nombre"] for b in logica.bases(solo_activas=True)]})
 
 
+@app.post(PREFIJO + "/api/preferencias")
+async def api_preferencias(req: Request):
+    """Preferencias del usuario (por ahora la vista del panel: una página o solapas)."""
+    _mismo_origen(req)
+    u = _requiere(req)
+    b = await req.json()
+    try:
+        auth.guardar_vista(u["usuario"], b.get("vista"))
+    except ValueError as e:
+        return _err(e)
+    return {"ok": True, "vista": b.get("vista")}
+
+
 @app.get(PREFIJO + "/api/estado")
 def api_estado(req: Request, fecha: str = "", transporte: str = ""):
     _requiere(req)
