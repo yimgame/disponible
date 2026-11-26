@@ -508,6 +508,23 @@ def reconsultar_gcg(mov_id, transporte_id=None, por=""):
 
 
 # ------------------------------------------------------------------ estado del día
+def recientes(transporte_id, dias=120):
+    """Para autocompletar el formulario del transporte: la última carga de cada equipo (por la patente de la
+    unidad 1) y los choferes que usó. Suele repetir el mismo semi / acoplado y chofer."""
+    desde = (date.fromisoformat(db.hoy()) - timedelta(days=dias)).isoformat()
+    equipos, choferes = {}, {}
+    with closing(db.con()) as c:
+        for r in c.execute("""SELECT fecha, patente, patente2, patente3, configuracion, tipo, pallets, chofer_dni, chofer_nombre
+                              FROM movimientos WHERE transporte_id=? AND accion='agrega' AND fecha>=?
+                              ORDER BY fecha DESC, id DESC""", (transporte_id, desde)):
+            if r["patente"] not in equipos:
+                equipos[r["patente"]] = {k: r[k] for k in ("fecha", "patente2", "patente3", "configuracion", "tipo",
+                                                           "pallets", "chofer_dni", "chofer_nombre")}
+            if r["chofer_dni"] and r["chofer_dni"] not in choferes:
+                choferes[r["chofer_dni"]] = r["chofer_nombre"] or ""
+    return {"recientes": equipos, "choferes": [{"dni": k, "nombre": v} for k, v in choferes.items()]}
+
+
 def estado_dia(fecha=None, transporte_id=None):
     fecha = fecha or db.hoy()
     with closing(db.con()) as c:

@@ -57,6 +57,8 @@
   .dos { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
   li.usada { opacity: .65; } li .usado { font-size: .8rem; font-weight: 700; color: var(--muted); }
   .hint { font-weight: 400; color: var(--muted); font-size: .8rem; }
+  #autollenado { margin: -.2rem 0 .4rem; color: var(--accent); }
+  #autollenado button.link { background: none; border: 0; padding: 0; margin: 0; width: auto; min-height: 0; color: inherit; text-decoration: underline; font: inherit; cursor: pointer; }
   .gcg { font-size: .85rem; margin-top: .3rem; display: grid; gap: .25rem; }
   .gcg .fila { display: flex; gap: .4rem; align-items: baseline; flex-wrap: wrap; }
   .gcg ul { list-style: disc; padding-left: 1.2rem; display: block; margin: 0; }
@@ -95,12 +97,13 @@
       <input id="patente" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AB123CD" maxlength="10">
     </label>
     <label for="patente2" id="w-p2"><span id="l-p2">Unidad 2 · Semi</span>
-      <input id="patente2" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AC456EF" maxlength="10">
+      <input id="patente2" class="pat-in" type="text" list="mis-remolques" autocomplete="off" placeholder="AC456EF" maxlength="10">
     </label>
     <label for="patente3" id="w-p3" hidden><span id="l-p3">Unidad 3 · Semi</span>
-      <input id="patente3" class="pat-in" type="text" list="mis-unidades" autocomplete="off" placeholder="AD789GH" maxlength="10">
+      <input id="patente3" class="pat-in" type="text" list="mis-remolques" autocomplete="off" placeholder="AD789GH" maxlength="10">
     </label>
-    <datalist id="mis-unidades"></datalist>
+    <datalist id="mis-unidades"></datalist><datalist id="mis-remolques"></datalist><datalist id="mis-choferes"></datalist>
+    <p id="autollenado" class="hint" hidden></p>
     <div id="alertas" hidden></div>
     <div>
       <div class="seg" role="group" aria-label="Tipo">
@@ -115,7 +118,7 @@
       <input id="eta" type="datetime-local">
     </label>
     <label for="chofer">DNI del chofer (opcional)
-      <input id="chofer" type="tel" inputmode="numeric" maxlength="12" placeholder="ej. 30123456" autocomplete="off">
+      <input id="chofer" type="tel" inputmode="numeric" maxlength="12" placeholder="ej. 30123456" autocomplete="off" list="mis-choferes">
     </label>
     <label for="comentario">Comentario (opcional)
       <input id="comentario" type="text" maxlength="200" placeholder="ej. se rompió, sin chofer…">
@@ -141,7 +144,32 @@
 <script>
 const T = new URLSearchParams(location.search).get('t') || '';
 const API = '/panel/publico/t/' + encodeURIComponent(T);
-let unidades = {}, tipo = '';
+let unidades = {}, recientes = {}, tipo = '';
+// Autocompletar: al poner la patente de la unidad 1 se completa con la última carga de ese equipo.
+// No pisa lo que el transportista ya escribió a mano (tocados).
+const tocados = new Set(); let autoDe = '';
+function autocompletar(p) {
+  const r = recientes[p];
+  if (p === autoDe) return false;
+  if (!r) {                                        // cambió a una patente sin historial: saca lo completado del equipo anterior
+    if (autoDe) { ['patente2', 'patente3', 'pallets', 'chofer'].forEach(id => { if (!tocados.has(id)) $(id).value = ''; });
+                  if (!tocados.has('tipo')) setTipo(''); autoDe = ''; $('autollenado').hidden = true; }
+    return false;
+  }
+  autoDe = p;
+  if (!tocados.has('config') && r.configuracion && CONFIG[r.configuracion]) { $('config').value = r.configuracion; aplicarConfig(); }
+  if (!tocados.has('patente2')) $('patente2').value = r.patente2 || '';
+  if (!tocados.has('patente3')) $('patente3').value = r.patente3 || '';
+  if (!tocados.has('tipo') && r.tipo) setTipo(r.tipo);
+  if (!tocados.has('pallets') && r.pallets) $('pallets').value = r.pallets;
+  if (!tocados.has('chofer')) $('chofer').value = r.chofer_dni || '';
+  const n = $('autollenado');
+  n.innerHTML = `↺ Completado con la última carga de ${esc(p)} (${r.fecha.split('-').reverse().join('/')}). Revisá y cambiá lo que haga falta. <button type="button" class="link" id="b-limpiar-auto">Borrar lo completado</button>`;
+  n.hidden = false;
+  $('b-limpiar-auto').onclick = () => { ['patente2', 'patente3', 'pallets', 'chofer'].forEach(id => { if (!tocados.has(id)) $(id).value = ''; });
+    if (!tocados.has('tipo')) setTipo(''); n.hidden = true; revisar(); };
+  return true;
+}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function aviso(texto, ok) { const m = $('msg'); m.textContent = texto; m.className = ok ? 'ok' : 'err'; m.hidden = false;
@@ -182,10 +210,16 @@ function ahoraLocal(min = 0) { const d = new Date(Date.now() + min * 60000); d.s
 function pintar(d) {
   $('titulo').textContent = 'Disponible · ' + d.transporte;
   $('sub').textContent = 'Hoy ' + d.fecha.split('-').reverse().join('/') + ' — cargá cada unidad que tengas para despachar';
-  if (d.unidades && d.unidades.length) {
-    unidades = Object.fromEntries(d.unidades.map(u => [u.patente, u]));
-    $('mis-unidades').innerHTML = Object.values(unidades).map(u => `<option value="${u.patente}">${u.tipo === 'refri' ? 'Refri' : 'Seco'} · ${u.pallets || '?'} pl${u.bloqueado ? ' · bloqueada' : ''}</option>`).join('');
-  }
+  unidades = Object.fromEntries((d.unidades || []).map(u => [u.patente, u]));
+  recientes = d.recientes || {};
+  // Sugerencias: primero los equipos que ya cargó (con su última carga), después el resto del maestro
+  const sug = Object.entries(recientes).map(([p, r]) => `<option value="${esc(p)}">Última vez: ${[r.patente2, r.patente3].filter(Boolean).map(esc).join(' + ') || 'solo'} · ${r.pallets || '?'} pl ${r.tipo || ''}${r.chofer_dni ? ' · chofer ' + esc(r.chofer_nombre || r.chofer_dni) : ''}</option>`)
+    .concat(Object.values(unidades).filter(u => !recientes[u.patente]).map(u => `<option value="${u.patente}">${u.tipo === 'refri' ? 'Refri' : 'Seco'} · ${u.pallets || '?'} pl${u.bloqueado ? ' · bloqueada' : ''}</option>`));
+  $('mis-unidades').innerHTML = sug.join('');
+  const rem = new Set(Object.values(recientes).flatMap(r => [r.patente2, r.patente3]).filter(Boolean));
+  Object.values(unidades).forEach(u => rem.add(u.patente));
+  $('mis-remolques').innerHTML = [...rem].map(p => `<option value="${esc(p)}">`).join('');
+  $('mis-choferes').innerHTML = (d.choferes || []).map(c => `<option value="${esc(c.dni)}">${esc(c.nombre || '')}</option>`).join('');
   const disp = d.filas.filter(f => f.estado === 'disponible'), usadas = d.filas.filter(f => f.estado === 'usada');
   const sum = (arr, t) => arr.filter(f => f.tipo === t);
   const pl = arr => arr.reduce((a, f) => a + (Number(f.pallets) || 0), 0);
@@ -252,6 +286,7 @@ async function enviar(accion, item) {
       caja.hidden = false; caja.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } else { caja.hidden = true; }
     ['patente', 'patente2', 'patente3', 'pallets', 'comentario', 'chofer'].forEach(id => ($(id).value = '')); mostrarAlertas([]); setTipo(''); pintar(d);
+    tocados.clear(); autoDe = ''; $('autollenado').hidden = true;
   } catch (e) { aviso(e.message, false); } finally { btns.forEach(b => b.disabled = false); }
 }
 
@@ -269,12 +304,15 @@ function leerForm(accion) {
   return { patente, patente2: ps[1] || '', patente3: ps[2] || '', configuracion: $('config').value, tipo, pallets, eta: $('eta').value, chofer_dni: dni };
 }
 
-document.querySelectorAll('.pat-in').forEach(el => el.addEventListener('input', () => {
+document.querySelectorAll('.pat-in').forEach(el => el.addEventListener('input', (e) => {
+  if (e.target.id !== 'patente') tocados.add(e.target.id);
+  if (e.target.id === 'patente' && autocompletar(norm($('patente').value))) return revisar();
   const ps = patentesForm().filter(Boolean), u = unidades[ps[ps.length - 1]];       // tipo y pallets: de la unidad que carga
-  if (u) { setTipo(u.tipo); $('pallets').value = u.pallets || ''; } revisar(); }));
-$('config').addEventListener('change', aplicarConfig);
+  if (u) { if (!tocados.has('tipo')) setTipo(u.tipo); if (!tocados.has('pallets')) $('pallets').value = u.pallets || ''; } revisar(); }));
+['pallets', 'chofer'].forEach(id => $(id).addEventListener('input', () => tocados.add(id)));
+$('config').addEventListener('change', () => { tocados.add('config'); aplicarConfig(); });
 $('chofer').addEventListener('input', revisar);
-document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => setTipo(b.dataset.v)));
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => { tocados.add('tipo'); setTipo(b.dataset.v); }));
 $('btn-si').addEventListener('click', () => { const i = leerForm('agrega'); if (i) enviar('agrega', i); });
 $('btn-no').addEventListener('click', () => { const i = leerForm('quita'); if (i) enviar('quita', i); });
 $('lista').addEventListener('click', async e => {

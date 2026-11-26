@@ -604,7 +604,8 @@ def _mio(t):
         unis = [dict(r) for r in c.execute("""SELECT patente, tipo, pallets, bloqueado FROM unidades
                                               WHERE nro_proveedor=? ORDER BY patente""", (t["nro_proveedor"] or "-",))]
     return {"ok": True, "transporte": t["nombre"], "fecha": e["fecha"], "cuota": t["cuota_dia"],
-            "estado": e["transportes"][0] if e["transportes"] else None, "filas": e["filas"], "unidades": unis}
+            "estado": e["transportes"][0] if e["transportes"] else None, "filas": e["filas"], "unidades": unis,
+            **logica.recientes(t["id"])}
 
 
 @app.get(PREFIJO + "/publico/t/{token}")
